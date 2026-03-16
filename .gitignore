@@ -1,0 +1,20 @@
+# Ambientes Virtuais
+.venv/
+venv/
+env/
+
+# Cache do Python e testes
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Banco de Dados Local (NUNCA suba o banco de dados pro GitHub)
+*.db
+*.sqlite3
+
+# Arquivos de ambiente (Segurança)
+.env
+
+# Configurações de IDE
+.vscode/
+.idea/
