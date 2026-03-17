@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, get_db
 from app.models import Base, Detection
 from app.schemas import DetectionCreate, DetectionResponse
+from app.api import detection
 
 # command for creating tables in the database based on the models
 Base.metadata.create_all(bind=engine)
@@ -42,10 +43,4 @@ async def health_check():
         "message": "API is up and running!"
     }
 
-@app.post("/detections", response_model=DetectionResponse, tags=["Detections"])
-def create_detection(detection: DetectionCreate, db: Session = Depends(get_db)):
-    db_detection = Detection(**detection.model_dump())
-    db.add(db_detection)
-    db.commit()
-    db.refresh(db_detection)
-    return db_detection
+app.include_router(detection.router)
