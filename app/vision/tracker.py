@@ -1,5 +1,8 @@
 import cv2
 from ultralytics import YOLO
+import requests
+
+API_URL = "http://127.0.0.1:8000/detection/"
 
 def tracker(video_path, model_path):
     print("Loading model...")
@@ -41,7 +44,14 @@ def tracker(video_path, model_path):
                     "track_id": int(track_id)
                 }
 
-                print(f"Detection: {json_data}")
+                try:
+                    response = requests.post(API_URL, json=json_data, timeout=0.1)
+                    if response.status_code == 200:
+                        print(f"Data sent successfully: {json_data}")
+                    else:
+                        print(f"Failed to send data: {response.status_code} - {response.text}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Error sending data: {e}")
 
         cv2.imshow('SenseVision', frame_with_boxes)
 
