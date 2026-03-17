@@ -6,7 +6,7 @@ class DetectionBase(BaseModel):
     # limits the list to 4 fields
     bbox: list[float] = Field(..., min_length=4, max_length=4, description="bounding box coordinates [x_min, y_min, x_max, y_max]")
     # limits the input to between 0 and 1
-    confidence: float = Field(..., ge=0.0, le=1.0, description="detection score")
+    score: float = Field(..., ge=0.0, le=1.0, description="detection score")
     track_id: int = Field(..., description="tracking ID")
 
 class DetectionCreate(DetectionBase):

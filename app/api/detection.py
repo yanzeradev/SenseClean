@@ -20,3 +20,8 @@ def create_detection(detection: DetectionCreate, db: Session = Depends(get_db)):
     db.refresh(db_detection)
 
     return db_detection
+
+@router.get("/", response_model=list[DetectionResponse])
+def get_detections(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    detections = db.query(Detection).offset(skip).limit(limit).all()
+    return detections
