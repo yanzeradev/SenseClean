@@ -9,6 +9,6 @@ class Detection(Base):
     id = Column(Integer, primary_key=True, index=True)
     cam_id = Column(Integer, index=True)
     bbox = Column(JSON)
-    confidence = Column(Float)
+    score = Column(Float)
     track_id = Column(Integer)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
