@@ -1,8 +1,17 @@
 import cv2
 from ultralytics import YOLO
 import requests
+import threading
 
 API_URL = "http://127.0.0.1:8000/detection/"
+
+def send_data(json_data):
+    try:
+        response = requests.post(API_URL, json=json_data, timeout = 0.5)
+        if response.status_code != 200:
+            print(f"Failed to send data: {response.status_code} - {response.text}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending data: {e}")
 
 def tracker(video_path, model_path):
     print("Loading model...")
@@ -24,9 +33,7 @@ def tracker(video_path, model_path):
             break
 
         results = model.track(frame, conf=0.5, persist=True, tracker="botsort.yaml")
-
         result = results[0]
-
         frame_with_boxes = result.plot()
 
         if result.boxes is not None and result.boxes.id is not None:
@@ -43,16 +50,10 @@ def tracker(video_path, model_path):
                     "score": round(float(score), 2),
                     "track_id": int(track_id)
                 }
-
-                try:
-                    response = requests.post(API_URL, json=json_data, timeout=0.1)
-                    if response.status_code == 200:
-                        print(f"Data sent successfully: {json_data}")
-                    else:
-                        print(f"Failed to send data: {response.status_code} - {response.text}")
-                except requests.exceptions.RequestException as e:
-                    print(f"Error sending data: {e}")
-
+        
+        thread = threading.Thread(target=send_data, args=(json_data,), daemon=True)
+        thread.start()
+                
         cv2.imshow('SenseVision', frame_with_boxes)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
