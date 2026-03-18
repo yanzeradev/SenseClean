@@ -11,16 +11,21 @@ router = APIRouter(
     tags=["Video Stream"],
 )
 
+TEMP_DIR = Path("temp")
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
 @router.post("/upload")
 def upload_video(file: UploadFile = File(...)):
     unique_id = uuid.uuid4().hex
-    path_temp = f"temp_{unique_id}_{file.filename}"
+    path_temp = TEMP_DIR / f"{unique_id}_{file.filename}"
 
     with open(path_temp, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
+    path_temp_str = path_temp.as_posix()
 
-    return {"status": "sucesso", "video_path": path_temp}
+
+    return {"status": "sucesso", "video_path": path_temp_str}
 
 @router.get("/stream")
 def stream_video(video_path: str):

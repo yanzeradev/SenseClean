@@ -18,3 +18,8 @@ __pycache__/
 # Configurações de IDE
 .vscode/
 .idea/
+
+# Arquivos temporarios e logs
+*.log
+temp/
+.temp/
