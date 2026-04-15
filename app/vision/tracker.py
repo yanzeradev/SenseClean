@@ -13,7 +13,7 @@ def send_data(json_data):
     except requests.exceptions.RequestException as e:
         print(f"Error sending data: {e}")
 
-def tracker(video_path, model_path):
+def tracker_video(video_path, model_path):
     print("Loading model...")
     model = YOLO(model_path)
 
@@ -51,14 +51,19 @@ def tracker(video_path, model_path):
                     "track_id": int(track_id)
                 }
         
-        thread = threading.Thread(target=send_data, args=(json_data,), daemon=True)
-        thread.start()
-                
-        cv2.imshow('SenseVision', frame_with_boxes)
+                thread = threading.Thread(target=send_data, args=(json_data,), daemon=True)
+                thread.start()
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            print("Exiting video processing.")
-            break
+        ok, buffer = cv2.imencode('.jpg', frame_with_boxes)
+        if not ok:
+            print("Error encoding frame.")
+            continue
+        
+        frame_bytes = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                
 
     cap.release()
     cv2.destroyAllWindows()
@@ -66,4 +71,4 @@ def tracker(video_path, model_path):
 if __name__ == "__main__":
     video_path = "test.mp4"
     model_path = "model_gender.pt"
-    tracker(video_path, model_path)
+    tracker_video(video_path, model_path)

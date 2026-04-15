@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, get_db
 from app.models import Base, Detection
 from app.schemas import DetectionCreate, DetectionResponse
-from app.api import detection
+from app.api import detection, video
 
 # command for creating tables in the database based on the models
 Base.metadata.create_all(bind=engine)
@@ -44,3 +44,4 @@ async def health_check():
     }
 
 app.include_router(detection.router)
+app.include_router(video.router)
