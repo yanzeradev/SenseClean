@@ -1,32 +1,37 @@
 import cv2
 import numpy as np
-from typing import Generator, Tuple, List, Dict, Any
+import asyncio
+from typing import AsyncGenerator, Tuple, List, Dict, Any
 from app.vision.interfaces import BaseDetector, BaseTracker
 
 class VideoPipeline:
     """
     Orchestrates the video reading, detection, and tracking processes.
-    Uses a generator pattern to yield results frame-by-frame, ensuring memory efficiency.
+    Uses an Async Generator pattern and Worker Threads to prevent Event Loop blocking.
     """
 
     def __init__(self, video_source: str, detector: BaseDetector, tracker: BaseTracker):
-        """
-        Args:
-            video_source (str): Path to the video file or RTSP stream URL.
-            detector (BaseDetector): An instance of a class implementing BaseDetector.
-            tracker (BaseTracker): An instance of a class implementing BaseTracker.
-        """
         self.video_source = video_source
         self.detector = detector
         self.tracker = tracker
 
-    def process(self) -> Generator[Tuple[np.ndarray, List[Dict[str, Any]]], None, None]:
+    def _process_single_frame(self, cap: cv2.VideoCapture) -> Tuple[bool, np.ndarray, List[Dict[str, Any]]]:
         """
-        Starts the video processing loop.
+        Synchronous method containing the heavy CPU/GPU operations.
+        This is designed to be executed inside a separate Thread.
+        """
+        ret, frame = cap.read()
+        if not ret:
+            return False, None, []
+            
+        detections = self.detector.detect(frame)
+        tracks = self.tracker.update(detections, frame)
+        
+        return True, frame, tracks
 
-        Yields:
-            Tuple[np.ndarray, List[Dict]]: A tuple containing the current frame (numpy array) 
-                                           and a list of tracked objects for that frame.
+    async def process(self) -> AsyncGenerator[Tuple[np.ndarray, List[Dict[str, Any]]], None]:
+        """
+        Starts the video processing loop asynchronously.
         """
         cap = cv2.VideoCapture(self.video_source)
 
@@ -35,19 +40,15 @@ class VideoPipeline:
 
         try:
             while True:
-                ret, frame = cap.read()
+                # 💥 MAGIC HAPPENS HERE:
+                # We send the heavy lifting to a background thread.
+                # The 'await' lets FastAPI answer frontend requests while waiting for the frame!
+                ret, frame, tracks = await asyncio.to_thread(self._process_single_frame, cap)
+                
                 if not ret:
                     break
 
-                # Step 1: Detect objects in the current frame
-                detections = self.detector.detect(frame)
-
-                # Step 2: Update the tracker with the new detections
-                tracks = self.tracker.update(detections, frame)
-
-                # Yield the frame and the tracks to the consumer
                 yield frame, tracks
-
+                
         finally:
-            # Ensures resources are released even if an exception occurs
             cap.release()

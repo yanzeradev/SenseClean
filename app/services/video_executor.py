@@ -45,12 +45,12 @@ async def process_video_background(video_id: str, video_path: str, in_side: str)
         # Signal that processing has officially started
         job["ready_event"].set()
         
-        # Iterate through the pipeline (Generator)
-        for frame, tracks in pipeline.process():
+        # 💥 CHANGE 1: Use 'async for' to consume the AsyncGenerator
+        async for frame, tracks in pipeline.process():
             # Update analytics with current tracks
             analytics.update(tracks)
             
-            # --- Draw results on the frame (Visualization) ---
+            # --- Draw results on the frame ---
             for track in tracks:
                 x1, y1, x2, y2 = map(int, track["bbox"])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -64,14 +64,16 @@ async def process_video_background(video_id: str, video_path: str, in_side: str)
             # Encode frame to JPEG
             success, buffer = cv2.imencode('.jpg', frame)
             if success:
-                # Push the frame to the queue for the Consumer to read
-                # If the queue gets too big, we can add logic to drop frames
                 await job["queue"].put(buffer.tobytes())
             
             # Update progress
             current_frame += 1
-            if total_frames > 0 and current_frame % 10 == 0:
+            if total_frames > 0 and current_frame % 5 == 0:
                 task_manager.update_progress(video_id, (current_frame / total_frames) * 100)
+
+            # 💥 CHANGE 2: The "Breathing Room"
+            # Explicitly yields control to the event loop so it can send the video stream to the browser
+            await asyncio.sleep(0.001)
 
         # Processing finished successfully
         task_manager.set_status(video_id, JobStatus.COMPLETED)
