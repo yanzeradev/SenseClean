@@ -48,3 +48,7 @@ class VideoRepository:
             self.db.commit()
             self.db.refresh(db_video)
         return db_video
+    
+    def get_all(self) -> list[Video]:
+        """Returns all videos ordered by newest first."""
+        return self.db.query(Video).order_by(Video.created_at.desc()).all()
