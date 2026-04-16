@@ -1,5 +1,6 @@
 import asyncio
 import cv2
+import numpy as np # NEEDED FOR SCALING
 from app.database import SessionLocal
 from app.repositories.video import VideoRepository
 from app.services.task_manager import task_manager, JobStatus
@@ -8,48 +9,66 @@ from app.vision.detectors.yolo_detector import YoloDetector
 from app.vision.trackers.yolo_tracker import YoloTracker
 from app.vision.analytics import ZoneAnalytics
 from app.core.config import MODEL_PATH
+# Import the schema to type hint the request
+from app.schemas.video import ProcessVideoRequest
 
-async def process_video_background(video_id: str, video_path: str, in_side: str):
-    """
-    The main background task that acts as the Producer.
-    It runs the AI pipeline and pushes processed frames to the queue.
-    """
-    # 1. Create a fresh DB Session dedicated to this background task
+async def process_video_background(video_id: str, video_path: str, request_data: ProcessVideoRequest):
     db = SessionLocal()
     repo = VideoRepository(db)
-    
-    # 2. Retrieve the active job state
     job = task_manager.get_job(video_id)
     if not job:
         db.close()
         return
 
-    # 3. Initialize Vision Components
-    detector = YoloDetector(model_path=str(MODEL_PATH))
-    tracker = YoloTracker(model_path=str(MODEL_PATH))
-    
-    # MOCK LINES: In the future, these will come from the user request (Frontend)
-    entrant_line = [{'x': 100, 'y': 300}, {'x': 500, 'y': 300}]
-    passerby_line = [{'x': 100, 'y': 150}, {'x': 500, 'y': 150}]
-    
-    analytics = ZoneAnalytics(entrant_line, passerby_line, in_side_direction=in_side)
-    pipeline = VideoPipeline(video_source=video_path, detector=detector, tracker=tracker)
-    
+    # Open video temporarily just to get its true resolution
     cap = cv2.VideoCapture(video_path)
+    true_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    true_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
 
+    # 💥 SCALE CALCULATION (Fixing the Resolution Mismatch)
+    # scale = true_video_size / frontend_canvas_size
+    scale_x = true_width / request_data.frame_dimensions.width if request_data.frame_dimensions.width else 1
+    scale_y = true_height / request_data.frame_dimensions.height if request_data.frame_dimensions.height else 1
+
+    def scale_points(points: list) -> list:
+        return [{'x': int(p['x'] * scale_x), 'y': int(p['y'] * scale_y)} for p in points]
+
+    # Apply the scaling to the coordinates received from the frontend
+    scaled_entrant_line = scale_points(request_data.entrant_line_points)
+    scaled_passerby_line = scale_points(request_data.passerby_line_points)
+
+    detector = YoloDetector(model_path=str(MODEL_PATH))
+    tracker = YoloTracker(model_path=str(MODEL_PATH))
+    
+    # Inject the scaled lines into the Analytics engine
+    analytics = ZoneAnalytics(
+        entrant_line=scaled_entrant_line, 
+        passerby_line=scaled_passerby_line, 
+        in_side_direction=request_data.in_side
+    )
+    
+    pipeline = VideoPipeline(video_source=video_path, detector=detector, tracker=tracker)
     current_frame = 0
 
     try:
-        # Signal that processing has officially started
         job["ready_event"].set()
         
-        # 💥 CHANGE 1: Use 'async for' to consume the AsyncGenerator
         async for frame, tracks in pipeline.process():
-            # Update analytics with current tracks
             analytics.update(tracks)
             
+            # --- Draw Lines on the Video (Visual Feedback) ---
+            # Helper to draw lines
+            def draw_polyline(img, points, color):
+                if len(points) < 2: return
+                for i in range(len(points) - 1):
+                    p1 = (int(points[i]['x']), int(points[i]['y']))
+                    p2 = (int(points[i+1]['x']), int(points[i+1]['y']))
+                    cv2.line(img, p1, p2, color, 3)
+
+            draw_polyline(frame, scaled_entrant_line, (0, 255, 0)) # Green for Entrants
+            draw_polyline(frame, scaled_passerby_line, (0, 255, 255)) # Yellow for Passerbys
             # --- Draw results on the frame ---
             for track in tracks:
                 x1, y1, x2, y2 = map(int, track["bbox"])
