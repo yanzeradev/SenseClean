@@ -28,6 +28,14 @@ class ProcessVideoRequest(BaseModel):
     passerby_line_points: List[Dict[str, float]]
     frame_dimensions: FrameDimensions
 
+@router.get("/")
+async def list_videos(db: Session = Depends(get_db)):
+    """
+    Fetches the history of all processed videos.
+    """
+    repo = VideoRepository(db)
+    return repo.get_all()
+
 # --- NEW UPLOAD ENDPOINT ---
 @router.post("/upload")
 async def upload_video(file: UploadFile = File(...)):

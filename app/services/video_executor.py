@@ -31,8 +31,8 @@ async def process_video_background(video_id: str, video_path: str, request_data:
 
     # --- Video Writer Setup (Saving the processed video) ---
     os.makedirs("static/output_videos", exist_ok=True)
-    out_video_path = f"static/output_videos/{video_id}.mp4"
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out_video_path = f"static/output_videos/{video_id}.webm"
+    fourcc = cv2.VideoWriter_fourcc(*'VP80') # Codec Nativo do Google para Web
     out = cv2.VideoWriter(out_video_path, fourcc, fps, (true_width, true_height))
     
     # 💥 SCALE CALCULATION (Fixing the Resolution Mismatch)
@@ -115,7 +115,7 @@ async def process_video_background(video_id: str, video_path: str, request_data:
         # The results JSON natively saves inside the SQLAlchemy column
         repo.save_results(
             video_id=video_id, 
-            processed_path=f"/static/output_videos/{video_id}.mp4", 
+            processed_path=f"/static/output_videos/{video_id}.webm", 
             results=final_results
         )
 
