@@ -25,4 +25,6 @@ temp/
 .temp/
 
 *.mp4
-static/
+static/frames/
+static/output_videos/
+static/uploads/
