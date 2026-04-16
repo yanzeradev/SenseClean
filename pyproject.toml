@@ -14,7 +14,9 @@ dependencies = [
     "opencv-python (>=4.13.0.92,<5.0.0.0)",
     "ultralytics (>=8.4.23,<9.0.0)",
     "requests (>=2.32.5,<3.0.0)",
-    "python-multipart (>=0.0.22,<0.0.23)"
+    "python-multipart (>=0.0.22,<0.0.23)",
+    "pandas (>=3.0.2,<4.0.0)",
+    "openpyxl (>=3.1.5,<4.0.0)"
 ]
 
 

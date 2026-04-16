@@ -28,3 +28,5 @@ temp/
 static/frames/
 static/output_videos/
 static/uploads/
+static/
+*.xml
