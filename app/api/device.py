@@ -194,7 +194,7 @@ def get_snapshot(device_id: int, db: Session = Depends(get_db)):
 
     # 2. Pede um frame instantâneo
     try:
-        res = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=4)
+        res = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=15)
         if res.status_code == 200:
             # Devolve a imagem crua, assim a tag <img> do HTML entende nativamente!
             return Response(content=res.content, media_type="image/jpeg")

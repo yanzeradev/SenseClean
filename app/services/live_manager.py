@@ -38,18 +38,36 @@ async def restart_camera(device_id: int):
         if device_id in stop_signals: del stop_signals[device_id]
         if device_id in monitor_queues: del monitor_queues[device_id]
 
-def get_stream_resolution(rtsp_url: str) -> tuple[int, int]:
-    """Descobre a resolução nativa do stream RTSP usando FFprobe."""
+async def get_stream_resolution(rtsp_url: str) -> tuple[int, int]:
+    """Descobre a resolução nativa de forma assíncrona para não travar o backend."""
     try:
-        cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", rtsp_url]
-        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
+        # 💥 Executa o FFprobe sem bloquear o loop principal
+        cmd = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0", 
+            "-show_entries", "stream=width,height", "-of", "csv=p=0", 
+            rtsp_url
+        ]
+        
+        # Usamos asyncio.create_subprocess_exec para não travar
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        # Timeout de 5 segundos: se a câmera não responder a resolução, abortamos
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+        output = stdout.decode().strip()
+        
         if output:
             parts = output.split(',')
             if len(parts) >= 2:
                 w, h = int(parts[0]), int(parts[1])
                 if w > 0 and h > 0: return w, h
-    except: pass
-    return 1920, 1080 # Fallback Full HD
+    except Exception as e:
+        print(f"⚠️ Não foi possível obter resolução de {rtsp_url}: {e}")
+        
+    return 1280, 720 # Fallback HD (mais leve que Full HD para evitar novos travamentos)
 
 async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
     """
@@ -112,40 +130,43 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
     db = SessionLocal()
     video_repo = VideoRepository(db)
     
-    # Criamos um "Video" no banco para registrar as estatísticas da sessão ao vivo
     video_id = f"live_{device_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
     process = None
     
     try:
-        # Configuração do Pipeline e do Go2RTC
+        # 1. TRADUÇÃO E REGISTRO NO GO2RTC
         stream_name = f"camera_{device_id}"
         go2rtc_api = "http://127.0.0.1:1984/api/streams"
         
-        # 💥 TRADUÇÃO DE IP PARA O DOCKER
+        # Traduz 127.0.0.1 para host.docker.internal para o go2rtc (Docker) conseguir ver o SIM Next
         rtsp_for_go2rtc = rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
-        local_rtsp = rtsp_url 
+        
+        # Nossa URL de consumo será o go2rtc local
+        local_rtsp = f"rtsp://127.0.0.1:8554/{stream_name}"
         
         try:
-            # Envia a URL traduzida para o go2rtc
-            requests.put(go2rtc_api, params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2)
+            requests.put(go2rtc_api, params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=3)
         except Exception: 
-            print("⚠️ go2rtc não respondeu. Consumindo vídeo direto da câmera.")
+            print(f"⚠️ go2rtc não respondeu para {stream_name}. Usando link direto.")
+            local_rtsp = rtsp_url
 
-
-        # Inicializa o registro no banco de dados para os gráficos
-        video_record = video_repo.create(original_video_path=local_rtsp)
-        video_record.id = video_id
-        db.commit()
-
-        WIDTH, HEIGHT = get_stream_resolution(local_rtsp)
-        FRAME_SIZE = WIDTH * HEIGHT * 3 
-
-        print(f"🔌 Ingestão FFMPEG: {local_rtsp} ({WIDTH}x{HEIGHT})")
+        # 2. RESOLUÇÃO (Aumentamos o tempo para 8s para o SIM Next responder)
+        WIDTH, HEIGHT = await get_stream_resolution(local_rtsp)
+        if WIDTH == 0 or HEIGHT == 0: WIDTH, HEIGHT = 1280, 720
         
-        if WIDTH == 0 or HEIGHT == 0: return
+        FRAME_SIZE = WIDTH * HEIGHT * 3 
+        print(f"🔌 Ingestão FFMPEG: {local_rtsp} ({WIDTH}x{HEIGHT})")
 
-        command = ['ffmpeg', '-rtsp_transport', 'tcp', '-i', local_rtsp, '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-r', '15', '-an', '-sn', '-y', '-']
+        # 3. COMANDO FFMPEG (TCP forçado e 5 FPS para não fritar o PC)
+        command = [
+            'ffmpeg', 
+            '-rtsp_transport', 'tcp', 
+            '-i', local_rtsp, 
+            '-f', 'rawvideo', 
+            '-pix_fmt', 'bgr24', 
+            '-r', '5', 
+            '-an', '-sn', '-y', '-'
+        ]
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
 
         # --- A MÁGICA DA ARQUITETURA LIMPA ---

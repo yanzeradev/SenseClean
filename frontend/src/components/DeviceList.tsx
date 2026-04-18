@@ -12,6 +12,7 @@ interface Point { x: number; y: number; }
 const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, activeLine, inSide }: any) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const [isLoading, setIsLoading] = useState(true);
 
     const drawLine = (ctx: CanvasRenderingContext2D, points: Point[], color: string, label: string) => {
         if (points.length === 0) return;
@@ -36,7 +37,7 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
     useEffect(() => {
         const cvs = canvasRef.current;
         const img = containerRef.current?.querySelector('img');
-        if (!cvs || !img) return;
+        if (!cvs || !img || isLoading) return;
 
         const render = () => {
             cvs.width = img.naturalWidth || img.width;
@@ -63,12 +64,64 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
     };
 
     return (
-        <div ref={containerRef} className="relative w-full rounded-lg overflow-hidden border border-gray-700 bg-black">
-            <img src={imageUrl} alt="Snapshot" className="w-full h-auto block" crossOrigin="anonymous" />
+        <div ref={containerRef} className="relative w-full aspect-video rounded-lg overflow-hidden border border-gray-700 bg-black">
+           
+            <img 
+                src={imageUrl} 
+                alt="Snapshot" 
+                className={`w-full h-full object-fill block transition-opacity duration-300 ${isLoading ? 'opacity-0' : 'opacity-100'}`} 
+                crossOrigin="anonymous" 
+                onLoad={() => setIsLoading(false)} 
+            />
             <canvas ref={canvasRef} onClick={handleClick} className="absolute top-0 left-0 w-full h-full cursor-crosshair z-10" />
         </div>
     );
 };
+
+const SnapshotViewer = ({ deviceId }: { deviceId: number }) => {
+  const [url, setUrl] = useState(`http://127.0.0.1:8000/devices/${deviceId}/snapshot?t=${Date.now()}`);
+  const [isError, setIsError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // 💥 NOVO ESTADO
+
+  const handleError = () => {
+    setIsError(true);
+    setIsLoading(false);
+    setTimeout(() => {
+      setUrl(`http://127.0.0.1:8000/devices/${deviceId}/snapshot?t=${Date.now()}`);
+      setIsError(false);
+      setIsLoading(true);
+    }, 3000);
+  };
+
+  return (
+    <div className="relative w-full h-full bg-gray-950 flex items-center justify-center">
+      {/* MENSAGEM DE CARREGANDO */}
+      {isLoading && !isError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-gray-900">
+          <RefreshCw className="w-5 h-5 animate-spin text-blue-500 mb-2" />
+          <span className="text-xs text-gray-400">Carregando imagem...</span>
+        </div>
+      )}
+
+      <img 
+        src={url} 
+        alt="Camera" 
+        className={`w-full h-full object-fill transition-opacity duration-500 ${isLoading || isError ? 'opacity-0' : 'opacity-100'}`} 
+        onError={handleError}
+        onLoad={() => setIsLoading(false)}
+      />
+
+      {isError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950 z-20">
+          <RefreshCw className="w-5 h-5 animate-spin text-red-500 mb-2" />
+          <span className="text-xs text-red-400 font-medium">Reconectando...</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+  
 
 export function DeviceList() {
   const [devices, setDevices] = useState<any[]>([]);
@@ -86,8 +139,7 @@ export function DeviceList() {
   
   // Config Form States
   const [authForm, setAuthForm] = useState({ ip: '', username: 'admin', password: '', port: '554' });
-  const [configForm, setConfigForm] = useState({ start: '08:00', end: '18:00' });
-  
+  const [configForm, setConfigForm] = useState({ name: '', start: '08:00', end: '18:00' });
   // Drawing Canvas States
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
   const [entrantPoints, setEntrantPoints] = useState<Point[]>([]);
@@ -137,7 +189,11 @@ export function DeviceList() {
   // 💥 FUNÇÃO ATUALIZADA: Puxa o Snapshot e restaura as linhas velhas
   const handleOpenConfig = (dev: any) => {
       setActiveDevice(dev);
-      setConfigForm({ start: dev.processing_start_time || '08:00', end: dev.processing_end_time || '18:00' });
+      setConfigForm({ 
+          name: dev.name || '', 
+          start: dev.processing_start_time || '08:00', 
+          end: dev.processing_end_time || '18:00' 
+      });
       
       if (dev.lines_config) {
           setEntrantPoints(dev.lines_config.entrant || []);
@@ -158,6 +214,7 @@ export function DeviceList() {
       const linesConfig = { entrant: entrantPoints, passerby: passerbyPoints, in_side: inSide };
       
       await api.put(`/devices/${activeDevice.id}/config`, {
+        name: configForm.name,
         processing_start_time: configForm.start,
         processing_end_time: configForm.end,
         lines_config: linesConfig
@@ -224,10 +281,10 @@ export function DeviceList() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {devices.map(dev => (
           <Card key={dev.id} className="bg-gray-900 border-gray-800 flex flex-col overflow-hidden">
-            <div className="relative aspect-video bg-black border-b border-gray-800 flex items-center justify-center">
-              
-              <img src={`http://127.0.0.1:8000/devices/${dev.id}/snapshot`} alt="Snapshot" className="w-full h-full object-cover" />
-              <Badge className="absolute top-2 right-2 bg-green-600">Online</Badge>
+            <div className="relative aspect-video bg-black border-b border-gray-800 flex items-center justify-center overflow-hidden">
+             
+              <SnapshotViewer deviceId={dev.id} />
+              <Badge className="absolute top-2 right-2 bg-green-600 z-10">Online</Badge>
             </div>
             
             <CardContent className="p-4 flex-1">
@@ -261,6 +318,15 @@ export function DeviceList() {
             <CardHeader><CardTitle>Configurar: {activeDevice.name}</CardTitle></CardHeader>
             <CardContent className="space-y-6">
                
+               <div className="space-y-2">
+                 <label className="text-xs text-gray-400 font-medium uppercase tracking-wider">Nome da Câmera / Setor</label>
+                 <Input 
+                    value={configForm.name} 
+                    onChange={e => setConfigForm({...configForm, name: e.target.value})} 
+                    className="bg-gray-950 border-gray-700 text-white"
+                 />
+               </div>
+
                <div className="space-y-3">
                  <h3 className="font-medium text-white">1. Desenhe as Linhas de Contagem</h3>
                  <div className="flex gap-2 flex-wrap">
@@ -331,9 +397,9 @@ export function DeviceList() {
               <h3 className="font-bold text-white flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>{viewingDevice.name} - Ao Vivo</h3>
               <Button variant="ghost" size="icon" onClick={() => { setViewingDevice(null); setStreamUrl(null); }} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></Button>
             </div>
-            <div className="bg-black aspect-video flex items-center justify-center relative">
+            <div className="bg-black aspect-video flex items-center justify-center relative overflow-hidden">
               {streamUrl ? (
-                <video ref={videoRef} src={streamUrl} className="w-full h-full object-contain" controls muted playsInline preload="auto"
+                <video ref={videoRef} src={streamUrl} className="w-full h-full object-fill" controls muted playsInline preload="auto"
                   onCanPlay={() => { if (videoRef.current) videoRef.current.play().catch(()=>console.log("Autoplay bloqueado")); }}
                 />
               ) : ( <RefreshCw className="w-8 h-8 animate-spin text-gray-500" /> )}
