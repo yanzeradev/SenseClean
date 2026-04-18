@@ -10,6 +10,8 @@ from app.services.task_manager import task_manager, JobStatus
 from app.services.video_executor import process_video_background
 from app.services.file_service import FileService # NEW IMPORT
 from app.schemas.video import ProcessVideoRequest
+from app.api.auth import get_current_user
+from app.models.user import User
 
 router = APIRouter(
     prefix="/videos",
@@ -29,12 +31,10 @@ class ProcessVideoRequest(BaseModel):
     frame_dimensions: FrameDimensions
 
 @router.get("/")
-async def list_videos(db: Session = Depends(get_db)):
-    """
-    Fetches the history of all processed videos.
-    """
+async def list_videos(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    
     repo = VideoRepository(db)
-    return repo.get_all()
+    return repo.get_all(user_id=current_user.id)
 
 # --- NEW UPLOAD ENDPOINT ---
 @router.post("/upload")
@@ -59,16 +59,15 @@ async def upload_video(file: UploadFile = File(...)):
 async def start_video_processing(
     request: ProcessVideoRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     repo = VideoRepository(db)
-    
-    # We reconstruct the physical path using the ID
     video_path = f"static/uploads/{request.video_id}.mp4"
     
-    # Save to database (Updating your repo logic slightly to use the ID)
-    video_record = repo.create(original_video_path=video_path)
-    # Force the DB ID to match our physical file ID to avoid confusion
+   
+    video_record = repo.create(original_video_path=video_path, user_id=current_user.id)
+    
     video_record.id = request.video_id
     db.commit()
     
