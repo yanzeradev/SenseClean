@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LayoutDashboard, Video, Camera, Settings } from "lucide-react";
-import { VideoAnalysis } from "@/components/VideoAnalysis";
-// Deixaremos esses como mock provisório até implementarmos a Fase 8 de verdade
-import { Dashboard } from "@/components/Dashboard";
+
+// Imports dos nossos componentes
+import { VideoAnalysis } from "./components/VideoAnalysis";
+import { Dashboard } from "./components/Dashboard";
+import { DeviceList } from "./components/DeviceList"; // 💥 1. ADICIONE ESTE IMPORT
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("analysis");
@@ -49,14 +51,14 @@ export default function App() {
             <Dashboard />
           </TabsContent>
           <TabsContent value="analysis">
-             {/* AQUI ENTRA A NOSSA LÓGICA MÁGICA DE CANVAS E UPLOAD */}
             <VideoAnalysis />
           </TabsContent>
+          
+          {/* 💥 2. SUBSTITUA O CONTEÚDO DESTA ABA PELO COMPONENTE */}
           <TabsContent value="devices">
-            <div className="flex items-center justify-center h-[400px] text-muted-foreground">
-              Gerenciamento de Câmeras RTSP (Fase 9 em breve).
-            </div>
+            <DeviceList />
           </TabsContent>
+
           <TabsContent value="settings">
             <div className="flex items-center justify-center h-[400px] text-muted-foreground">
               Configurações do sistema.

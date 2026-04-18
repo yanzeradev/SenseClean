@@ -19,6 +19,16 @@ export const api = {
     return res.json();
   },
 
+  async put(endpoint: string, data: any) {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   async upload(endpoint: string, file: File) {
     const formData = new FormData();
     // Importante: No nosso backend, o parametro se chama 'file', não 'video'
@@ -29,5 +39,13 @@ export const api = {
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
+  },
+  async delete(endpoint: string) {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(await res.text());
+    // A rota de exclusão do FastAPI retorna 204 No Content (sem JSON)
+    return res.status === 204 ? null : res.json().catch(() => null);
   },
 };
