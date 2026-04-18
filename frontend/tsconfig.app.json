@@ -24,8 +24,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
 
-    /* 💥 ADICIONADO: Configuração de Alias para o TypeScript */
-    "baseUrl": ".",
+    /* ✅ CORREÇÃO: Usando caminhos relativos sem baseUrl depreciado */
     "paths": {
       "@/*": ["./src/*"]
     }
