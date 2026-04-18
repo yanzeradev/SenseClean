@@ -225,11 +225,8 @@ export function DeviceList() {
         {devices.map(dev => (
           <Card key={dev.id} className="bg-gray-900 border-gray-800 flex flex-col overflow-hidden">
             <div className="relative aspect-video bg-black border-b border-gray-800 flex items-center justify-center">
-              {/* O NOVO STREAM: Mostra a IA rodando ou cai para o Frame limpo do Go2RTC! */}
-              <img 
-                src={`http://127.0.0.1:8000/devices/${dev.id}/monitor_stream`} 
-                alt="Monitor" className="w-full h-full object-cover"
-              />
+              
+              <img src={`http://127.0.0.1:8000/devices/${dev.id}/snapshot`} alt="Snapshot" className="w-full h-full object-cover" />
               <Badge className="absolute top-2 right-2 bg-green-600">Online</Badge>
             </div>
             
