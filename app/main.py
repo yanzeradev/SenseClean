@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.database import engine, Base
-from app.api import detection, video, device # IMPORT DEVICE ROUTER
+from app.api import detection, video, device, auth
 from app.services import live_manager # IMPORT LIVE MANAGER
 from app.vision.detectors.yolo_detector import YoloDetector
 from app.vision.trackers.yolo_tracker import YoloTracker
@@ -44,6 +44,7 @@ origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+app.include_router(auth.router)
 app.include_router(detection.router)
 app.include_router(video.router)
 app.include_router(device.router)

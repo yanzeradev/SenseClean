@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, JSON
+from sqlalchemy import Column, String, DateTime, JSON, Integer
 from datetime import datetime, timezone
 from app.database import Base
 import uuid
@@ -16,6 +16,8 @@ class Video(Base):
     original_video_path = Column(String, nullable=False)
     processed_video_path = Column(String, nullable=True)
     
+    user_id = Column(Integer, index=True, nullable=True)
+
     # Status tracks the lifecycle: pending, processing, completed, failed
     status = Column(String, default="pending", index=True)
     
