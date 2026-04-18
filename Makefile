@@ -2,8 +2,8 @@
 
 # Starts the SenseVision server
 run-back:
+	docker compose up -d go2rtc
 	poetry run uvicorn app.main:app --reload
-
 install-back:
 	poetry install
 
