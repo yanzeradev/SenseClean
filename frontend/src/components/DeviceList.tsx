@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Camera, Search, Plus, RefreshCw, Settings, Trash2, Activity } from "lucide-react";
+import { Camera, Search, Plus, RefreshCw, Settings, Trash2, Activity, Eye, X } from "lucide-react";
 import { api } from "@/lib/api";
 
 export function DeviceList() {
@@ -15,8 +15,12 @@ export function DeviceList() {
   const [showAddModal, setShowAuthModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [activeDevice, setActiveDevice] = useState<any>(null);
+  const [viewingDevice, setViewingDevice] = useState<any>(null);
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  
   
   // Forms
+  const videoRef = useRef<HTMLVideoElement>(null); 
   const [authForm, setAuthForm] = useState({ ip: '', username: 'admin', password: '', port: '554' });
   const [configForm, setConfigForm] = useState({ start: '08:00', end: '18:00' });
 
@@ -88,6 +92,18 @@ export function DeviceList() {
     } catch (e) {}
   };
 
+  const handleViewStream = async (dev: any) => {
+    try {
+      const res = await api.get(`/devices/${dev.id}/stream-camera`);
+      // Pega o nome do stream (ex: camera_1) e usa a rota /api/stream.mp4 nativa do Go2RTC
+      const go2rtcUrl = `http://127.0.0.1:1984/api/stream.mp4?src=${res.stream_name}`;
+      setStreamUrl(go2rtcUrl);
+      setViewingDevice(dev);
+    } catch (e) {
+      alert("Erro ao iniciar o stream da câmera.");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -143,6 +159,9 @@ export function DeviceList() {
             </CardContent>
 
             <div className="bg-gray-950 p-2 flex gap-2 border-t border-gray-800">
+              <Button variant="secondary" className="flex-1 gap-2 bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 hover:text-blue-300" onClick={() => handleViewStream(dev)}>
+                <Eye className="w-4 h-4" /> Visualizar
+              </Button>
               <Button variant="secondary" className="flex-1 gap-2" onClick={() => {
                  setActiveDevice(dev);
                  setConfigForm({ start: dev.processing_start_time || '08:00', end: dev.processing_end_time || '18:00' });
@@ -207,6 +226,47 @@ export function DeviceList() {
                 </div>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* 💥 MODAL DE STREAMING AO VIVO */}
+      {viewingDevice && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" onClick={() => { setViewingDevice(null); setStreamUrl(null); }}>
+          <div className="w-full max-w-4xl bg-gray-900 border border-gray-700 rounded-xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+            
+            {/* Header do Player */}
+            <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                {viewingDevice.name} - Ao Vivo
+              </h3>
+              <Button variant="ghost" size="icon" onClick={() => { setViewingDevice(null); setStreamUrl(null); }} className="text-gray-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+            
+            {/* Player de Vídeo em HTML5 nativo processando o stream MP4 do Go2RTC */}
+            <div className="bg-black aspect-video flex items-center justify-center relative">
+              {streamUrl ? (
+                <video 
+                  ref={videoRef}
+                  src={streamUrl} 
+                  className="w-full h-full object-contain" 
+                  controls 
+                  muted 
+                  playsInline 
+                  preload="auto"
+                  onCanPlay={() => {
+                    if (videoRef.current) {
+                        videoRef.current.play().catch(e => console.log("Navegador bloqueou autoplay:", e));
+                    }
+                  }}
+                />
+              ) : (
+                <RefreshCw className="w-8 h-8 animate-spin text-gray-500" />
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

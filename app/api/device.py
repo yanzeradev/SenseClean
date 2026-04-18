@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import cv2
 import numpy as np
+import requests
 
 from app.database import get_db
 from app.repositories.device import DeviceRepository
@@ -18,22 +19,26 @@ router = APIRouter(
     tags=["Devices"],
 )
 
-async def check_port(ip: str, port: int, timeout: float = 0.5):
-    try:
-        conn = asyncio.open_connection(ip, port)
-        reader, writer = await asyncio.wait_for(conn, timeout=timeout)
-        writer.close()
-        await writer.wait_closed()
-        return ip
-    except:
-        return None
+# Semáforo para não estourar o limite de conexões do Windows
+scan_semaphore = asyncio.Semaphore(50) 
+
+async def check_port(ip: str, port: int, timeout: float = 1.0):
+    """Testa a porta respeitando o limite de conexões simultâneas."""
+    async with scan_semaphore:
+        try:
+            conn = asyncio.open_connection(ip, port)
+            reader, writer = await asyncio.wait_for(conn, timeout=timeout)
+            writer.close()
+            await writer.wait_closed()
+            return ip
+        except:
+            return None
 
 @router.get("/scan", response_model=List[str])
 async def scan_network():
-    """Varre a rede local em busca de portas 554 (RTSP) abertas."""
+    """Varre a rede local em busca de portas 554 (RTSP) abertas, em lotes seguros."""
     target_subnets = ['192.168.0.', '192.168.1.']
     
-    # Tenta descobrir a subrede atual da máquina
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 1))
@@ -179,3 +184,30 @@ async def monitor_stream(device_id: int):
             await asyncio.sleep(1.0)
 
     return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+@router.get("/{device_id}/stream-camera")
+def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):
+    """Registra a câmera no serviço Go2RTC traduzindo o IP se for Localhost."""
+    repo = DeviceRepository(db)
+    dev = repo.get_by_id(device_id)
+    if not dev:
+        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
+
+    stream_name = f"camera_{dev.id}"
+    
+    # 💥 O SEGREDO: Se for 127.0.0.1, manda o Docker olhar para a máquina host!
+    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal")
+    
+    go2rtc_api_url = "http://127.0.0.1:1984/api/streams"
+    
+    payload = {
+        "src": rtsp_for_go2rtc,
+        "name": stream_name
+    }
+
+    try:
+        requests.put(go2rtc_api_url, params=payload, timeout=2)
+    except Exception as e:
+        print(f"⚠️ Erro ao contatar Go2RTC: {e}")
+
+    return {"stream_name": stream_name}

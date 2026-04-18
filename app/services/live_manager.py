@@ -120,18 +120,18 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
     try:
         # Configuração do Pipeline e do Go2RTC
         stream_name = f"camera_{device_id}"
-        
-        # 💥 FORÇA O USO DA MÁQUINA LOCAL E ADICIONA FALLBACK
         go2rtc_api = "http://127.0.0.1:1984/api/streams"
-        local_rtsp = rtsp_url # Fallback direto para a câmera caso não ache o go2rtc
+        
+        # 💥 TRADUÇÃO DE IP PARA O DOCKER
+        rtsp_for_go2rtc = rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal")
+        local_rtsp = rtsp_url 
+        
         try:
-            requests.put(go2rtc_api, params={"src": rtsp_url, "name": stream_name}, timeout=2)
-            local_rtsp = f"rtsp://127.0.0.1:8554/{stream_name}"
+            # Envia a URL traduzida para o go2rtc
+            requests.put(go2rtc_api, params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2)
         except Exception: 
             print("⚠️ go2rtc não respondeu. Consumindo vídeo direto da câmera.")
 
-        # Consumimos do Go2RTC local para não sobrecarregar a câmera física
-        local_rtsp = f"rtsp://sense_go2rtc:8554/{stream_name}"
 
         # Inicializa o registro no banco de dados para os gráficos
         video_record = video_repo.create(original_video_path=local_rtsp)

@@ -1,0 +1,9 @@
+services:
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: sense_go2rtc
+    ports:
+      - "1984:1984" # API e Web Interface
+      - "8554:8554" # RTSP Server
+      - "8555:8555" # WebRTC
+    restart: unless-stopped
