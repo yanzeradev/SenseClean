@@ -19,11 +19,11 @@ router = APIRouter(
     tags=["Devices"],
 )
 
-# Semáforo para não estourar o limite de conexões do Windows
-scan_semaphore = asyncio.Semaphore(20) 
+# Semáforo ajustado: 50 conexões por vez para não travar o Windows
+scan_semaphore = asyncio.Semaphore(50)
 
-async def check_port(ip: str, port: int, timeout: float = 2.0):
-    """Testa a porta com um timeout maior (2s) para dar tempo de câmeras Wi-Fi responderem."""
+async def check_port(ip: str, port: int, timeout: float = 1.5):
+    """Testa se a porta da câmera está aberta. Timeout maior (1.5s) para câmeras Wi-Fi/lentas."""
     async with scan_semaphore:
         try:
             conn = asyncio.open_connection(ip, port)
@@ -31,32 +31,46 @@ async def check_port(ip: str, port: int, timeout: float = 2.0):
             writer.close()
             await writer.wait_closed()
             return ip
-        except:
+        except Exception:
             return None
 
 @router.get("/scan", response_model=List[str])
 async def scan_network():
-    """Varre a rede local em busca de portas 554 (RTSP) abertas."""
-    target_subnets = ['192.168.0.', '192.168.1.']
+    """Varre as redes locais (forçando as padrões do Brasil e a rede atual)."""
+    print("🕵️ Iniciando varredura de rede...")
     
+    # 1. IPs que OBRIGATORIAMENTE vamos testar (Redes de roteadores comuns no Brasil)
+    subnets_to_test = set(['192.168.0', '192.168.1', '10.0.0'])
+    
+    # 2. Tenta descobrir a rede real da máquina e adiciona na lista
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 1))
         local_ip = s.getsockname()[0]
         s.close()
-        container_subnet = '.'.join(local_ip.split('.')[:-1]) + '.'
-        if container_subnet not in target_subnets and not container_subnet.startswith('172.'):
-            target_subnets.append(container_subnet)
-    except Exception: pass
+        base_ip = '.'.join(local_ip.split('.')[:-1])
+        subnets_to_test.add(base_ip)
+        print(f"📍 Rede detectada do PC: {base_ip}.x")
+    except Exception:
+        pass
 
     tasks = []
-    for subnet in target_subnets:
+    print(f"📡 Varrendo as redes: {', '.join(subnets_to_test)} em busca da porta 554 (RTSP)...")
+    
+    # Cria a fila de testes varrendo do IP 1 até o 254 em cada rede
+    for subnet in subnets_to_test:
         for i in range(1, 255):
-            # 💥 Aumentamos o timeout aqui também para 2.0 segundos
-            tasks.append(check_port(f"{subnet}{i}", 554, timeout=2.0))
+            ip = f"{subnet}.{i}"
+            tasks.append(check_port(ip, 554))
             
+    # Dispara tudo (respeitando o semáforo)
     results = await asyncio.gather(*tasks)
-    return [ip for ip in results if ip is not None]
+    
+    # Filtra apenas os que responderam
+    found_ips = list(set([ip for ip in results if ip is not None]))
+    
+    print(f"✅ Varredura concluída. Câmeras encontradas: {found_ips}")
+    return found_ips
 
 @router.get("/", response_model=List[DeviceResponse])
 def list_devices(db: Session = Depends(get_db)):

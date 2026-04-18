@@ -195,6 +195,32 @@ export function DeviceList() {
         </div>
       </div>
 
+      {/* 💥 ÁREA DE CÂMERAS ENCONTRADAS PELO SCANNER */}
+      {scannedIps.length > 0 && (
+        <div className="bg-blue-950/30 border border-blue-900 rounded-lg p-4 animate-in fade-in slide-in-from-top-4">
+          <h3 className="text-sm font-medium text-blue-300 mb-3 flex items-center gap-2">
+            <Search className="w-4 h-4" /> Câmeras Encontradas (Clique para conectar)
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {scannedIps.map(ip => (
+              <Button 
+                key={ip} 
+                variant="outline" 
+                className="bg-blue-900/40 border-blue-700 text-blue-100 hover:bg-blue-700 hover:text-white"
+                onClick={() => {
+                  // Preenche o formulário automaticamente com o IP clicado e abre o modal!
+                  setAuthForm({ ip: ip, username: 'admin', password: '', port: '554' });
+                  setShowAuthModal(true);
+                }}
+              >
+                <Camera className="w-4 h-4 mr-2" />
+                {ip}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {devices.map(dev => (
           <Card key={dev.id} className="bg-gray-900 border-gray-800 flex flex-col overflow-hidden">
