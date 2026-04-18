@@ -123,7 +123,7 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
         go2rtc_api = "http://127.0.0.1:1984/api/streams"
         
         # 💥 TRADUÇÃO DE IP PARA O DOCKER
-        rtsp_for_go2rtc = rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal")
+        rtsp_for_go2rtc = rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
         local_rtsp = rtsp_url 
         
         try:

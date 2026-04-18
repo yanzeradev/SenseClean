@@ -2,7 +2,7 @@ import asyncio
 import socket
 import subprocess
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 from typing import List
 import cv2
@@ -20,10 +20,10 @@ router = APIRouter(
 )
 
 # Semáforo para não estourar o limite de conexões do Windows
-scan_semaphore = asyncio.Semaphore(50) 
+scan_semaphore = asyncio.Semaphore(20) 
 
-async def check_port(ip: str, port: int, timeout: float = 1.0):
-    """Testa a porta respeitando o limite de conexões simultâneas."""
+async def check_port(ip: str, port: int, timeout: float = 2.0):
+    """Testa a porta com um timeout maior (2s) para dar tempo de câmeras Wi-Fi responderem."""
     async with scan_semaphore:
         try:
             conn = asyncio.open_connection(ip, port)
@@ -36,7 +36,7 @@ async def check_port(ip: str, port: int, timeout: float = 1.0):
 
 @router.get("/scan", response_model=List[str])
 async def scan_network():
-    """Varre a rede local em busca de portas 554 (RTSP) abertas, em lotes seguros."""
+    """Varre a rede local em busca de portas 554 (RTSP) abertas."""
     target_subnets = ['192.168.0.', '192.168.1.']
     
     try:
@@ -52,7 +52,8 @@ async def scan_network():
     tasks = []
     for subnet in target_subnets:
         for i in range(1, 255):
-            tasks.append(check_port(f"{subnet}{i}", 554, timeout=1.0))
+            # 💥 Aumentamos o timeout aqui também para 2.0 segundos
+            tasks.append(check_port(f"{subnet}{i}", 554, timeout=2.0))
             
     results = await asyncio.gather(*tasks)
     return [ip for ip in results if ip is not None]
@@ -162,26 +163,69 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Câmera não encontrada")
     return {"ok": True}
 
-@router.get("/{device_id}/monitor_stream")
-async def monitor_stream(device_id: int):
-    """Rota MJPEG que consome a fila da câmera processada pelo Live Manager"""
-    async def frame_generator():
-        # Fallback de carregamento
-        loading_img = np.zeros((360, 640, 3), np.uint8)
-        cv2.putText(loading_img, "Conectando IA...", (180, 180), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        _, loading_buffer = cv2.imencode('.jpg', loading_img)
+@router.get("/{device_id}/snapshot")
+def get_snapshot(device_id: int, db: Session = Depends(get_db)):
+    """Retorna uma imagem estática (JPEG) da câmera para o Canvas de desenho do Frontend."""
+    repo = DeviceRepository(db)
+    dev = repo.get_by_id(device_id)
+    if not dev: raise HTTPException(404, "Câmera não encontrada")
+    
+    stream_name = f"camera_{dev.id}"
+    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
+    
+    # 1. Garante que a câmera está registrada no motor
+    try:
+        requests.put("http://127.0.0.1:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2)
+    except: pass
+
+    # 2. Pede um frame instantâneo
+    try:
+        res = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=4)
+        if res.status_code == 200:
+            # Devolve a imagem crua, assim a tag <img> do HTML entende nativamente!
+            return Response(content=res.content, media_type="image/jpeg")
+    except Exception as e:
+        print(f"Erro no snapshot: {e}")
+        pass
         
+    raise HTTPException(500, "Não foi possível capturar o frame da câmera. Ela está online?")
+
+@router.get("/{device_id}/monitor_stream")
+async def monitor_stream(device_id: int, db: Session = Depends(get_db)):
+    """Rota MJPEG que consome a fila da IA ou faz fallback exibindo a imagem limpa da câmera"""
+    repo = DeviceRepository(db)
+    dev = repo.get_by_id(device_id)
+    if not dev: raise HTTPException(404, "Dispositivo não encontrado")
+        
+    stream_name = f"camera_{dev.id}"
+
+    async def frame_generator():
         while True:
+            # 1. TENTA PEGAR O VÍDEO COM AS CAIXAS VERDES DA IA
             if device_id in live_manager.monitor_queues:
                 q = live_manager.monitor_queues[device_id]
                 try:
-                    frame_bytes = await asyncio.wait_for(q.get(), timeout=2.0)
+                    frame_bytes = await asyncio.wait_for(q.get(), timeout=1.0)
                     yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                     continue
                 except: pass
             
+            # 2. IA DESLIGADA? TENTA PEGAR O FRAME LIMPO DA CÂMERA (VIA GO2RTC)
+            try:
+                res = await asyncio.to_thread(requests.get, f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=2)
+                if res.status_code == 200:
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + res.content + b'\r\n')
+                    await asyncio.sleep(1.0) # Puxa 1 frame por segundo para não pesar o dashboard
+                    continue
+            except Exception:
+                pass
+            
+            # 3. CÂMERA DESLIGADA/CAIU A REDE
+            loading_img = np.zeros((360, 640, 3), np.uint8)
+            cv2.putText(loading_img, "Offline / Conectando...", (140, 180), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            _, loading_buffer = cv2.imencode('.jpg', loading_img)
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + loading_buffer.tobytes() + b'\r\n')
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(2.0)
 
     return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
@@ -196,7 +240,7 @@ def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):
     stream_name = f"camera_{dev.id}"
     
     # 💥 O SEGREDO: Se for 127.0.0.1, manda o Docker olhar para a máquina host!
-    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal")
+    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
     
     go2rtc_api_url = "http://127.0.0.1:1984/api/streams"
     
