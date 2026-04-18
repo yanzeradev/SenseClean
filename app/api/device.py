@@ -13,6 +13,8 @@ from app.database import get_db
 from app.repositories.device import DeviceRepository
 from app.schemas.device import DeviceResponse, DeviceConnect, DeviceUpdate
 from app.services import live_manager
+from app.api.auth import get_current_user
+from app.models.user import User
 
 router = APIRouter(
     prefix="/devices",
@@ -73,11 +75,12 @@ async def scan_network():
     return found_ips
 
 @router.get("/", response_model=List[DeviceResponse])
-def list_devices(db: Session = Depends(get_db)):
-    return DeviceRepository(db).get_all()
+def list_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    
+    return DeviceRepository(db).get_all(user_id=current_user.id)
 
 @router.post("/autodiscover")
-async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db)):
+async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Testa múltiplos padrões RTSP com a lógica nativa do FFprobe (H.265 e UDP suportados)."""
     from urllib.parse import quote
     import ffmpeg # 💥 IMPORTANDO O FFMPEG-PYTHON DO SEU LEGADO
@@ -144,6 +147,13 @@ async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db))
 
         tasks = [check_channel(ch) for ch in range(2, 17)]
         results = await asyncio.gather(*tasks)
+        if not existing_dev:
+            new_dev = repo.create(
+                ip_address=dev.ip_address, port=dev.port, 
+                username=dev.username, password=dev.password, 
+                rtsp_url=url_ch1, manufacturer=manufacturer,
+                user_id=current_user.id
+            )
         
         for res in results:
             if res:

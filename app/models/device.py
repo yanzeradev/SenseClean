@@ -15,6 +15,8 @@ class Device(Base):
     username = Column(String, nullable=True)
     password = Column(String, nullable=True)
     rtsp_url = Column(String, nullable=True)
+
+    user_id = Column(Integer, index=True, nullable=True)
     
     # State flags
     is_configured = Column(Boolean, default=False)

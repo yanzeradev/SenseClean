@@ -18,11 +18,11 @@ class VideoRepository:
         """Fetches a video by its UUID."""
         return self.db.query(Video).filter(Video.id == video_id).first()
 
-    def create(self, original_video_path: str) -> Video:
-        """Creates a new video record in the database."""
+    def create(self, original_video_path: str, user_id: int) -> Video:
         db_video = Video(
             original_video_path=original_video_path,
-            status="pending"
+            status="pending",
+            user_id=user_id 
         )
         self.db.add(db_video)
         self.db.commit()
@@ -49,6 +49,6 @@ class VideoRepository:
             self.db.refresh(db_video)
         return db_video
     
-    def get_all(self) -> list[Video]:
-        """Returns all videos ordered by newest first."""
-        return self.db.query(Video).order_by(Video.created_at.desc()).all()
+    def get_all(self, user_id: int) -> list[Video]:
+        """Returns all videos for a specific user."""
+        return self.db.query(Video).filter(Video.user_id == user_id).order_by(Video.created_at.desc()).all()
