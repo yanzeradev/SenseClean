@@ -36,7 +36,7 @@ services:
     build: ./frontend
     container_name: sense_frontend
     ports:
-      - "5173:80" 
+      - "80:80" 
     depends_on:
       - backend
     restart: unless-stopped
