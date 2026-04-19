@@ -166,7 +166,7 @@ async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db),
                         ip_address=dev.ip_address, port=dev.port, 
                         username=dev.username, password=dev.password, 
                         rtsp_url=url, manufacturer=manufacturer,
-                        user_id=current_user.id
+                        user_id=current_user.id 
                     )
                     config_update = DeviceUpdate(name=f"Cam {dev.ip_address.split('.')[-1]} - Canal {ch_num}")
                     repo.update(dev_ch.id, config_update)
@@ -197,16 +197,16 @@ def get_snapshot(device_id: int, db: Session = Depends(get_db)):
     if not dev: raise HTTPException(404, "Câmera não encontrada")
     
     stream_name = f"camera_{dev.id}"
-    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
+    rtsp_for_go2rtc = dev.rtsp_url.replace("go2rtc", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
     
     # 1. Garante que a câmera está registrada no motor
     try:
-        requests.put("http://127.0.0.1:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2)
+        requests.put("http://go2rtc:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2)
     except: pass
 
     # 2. Pede um frame instantâneo
     try:
-        res = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=15)
+        res = requests.get(f"http://go2rtc:1984/api/frame.jpeg?src={stream_name}", timeout=15)
         if res.status_code == 200:
             # Devolve a imagem crua, assim a tag <img> do HTML entende nativamente!
             return Response(content=res.content, media_type="image/jpeg")
@@ -238,7 +238,7 @@ async def monitor_stream(device_id: int, db: Session = Depends(get_db)):
             
             # 2. IA DESLIGADA? TENTA PEGAR O FRAME LIMPO DA CÂMERA (VIA GO2RTC)
             try:
-                res = await asyncio.to_thread(requests.get, f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=2)
+                res = await asyncio.to_thread(requests.get, f"http://go2rtc:1984/api/frame.jpeg?src={stream_name}", timeout=2)
                 if res.status_code == 200:
                     yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + res.content + b'\r\n')
                     await asyncio.sleep(1.0) # Puxa 1 frame por segundo para não pesar o dashboard
@@ -265,10 +265,10 @@ def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):
 
     stream_name = f"camera_{dev.id}"
     
-    # 💥 O SEGREDO: Se for 127.0.0.1, manda o Docker olhar para a máquina host!
-    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
+    # 💥 O SEGREDO: Se for go2rtc, manda o Docker olhar para a máquina host!
+    rtsp_for_go2rtc = dev.rtsp_url.replace("go2rtc", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
     
-    go2rtc_api_url = "http://127.0.0.1:1984/api/streams"
+    go2rtc_api_url = "http://go2rtc:1984/api/streams"
     
     payload = {
         "src": rtsp_for_go2rtc,

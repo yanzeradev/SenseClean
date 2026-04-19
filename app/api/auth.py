@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import os
 
 from app.database import get_db
 from app.models.user import User
@@ -9,12 +10,14 @@ from fastapi.security import OAuth2PasswordBearer
 import jwt
 from app.core.security import SECRET_KEY, ALGORITHM
 
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # Schemas de validação para a rota
 class UserCreate(BaseModel):
     email: str
     password: str
+    invite_code: str
 
 class UserLogin(BaseModel):
     email: str
@@ -22,6 +25,9 @@ class UserLogin(BaseModel):
 
 @router.post("/register")
 def register_user(user: UserCreate, db: Session = Depends(get_db)):
+    expected_code = os.getenv("REGISTRATION_INVITE_CODE", "SENSE_DEFAULT")
+    if user.invite_code != expected_code:
+        raise HTTPException(status_code=403, detail="Código de convite inválido.")
     """Cria um novo cliente no banco de dados."""
     # Verifica se o email já existe
     db_user = db.query(User).filter(User.email == user.email).first()

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Video, Loader2, AlertCircle } from "lucide-react";
+import { Video, Loader2, AlertCircle, Ticket } from "lucide-react"; // Adicionei o ícone Ticket
 import { api } from "@/lib/api";
 
 interface AuthProps {
@@ -16,6 +16,7 @@ export function Auth({ onLoginSuccess }: AuthProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [inviteCode, setInviteCode] = useState(''); // Estado já criado por você
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,15 +31,19 @@ export function Auth({ onLoginSuccess }: AuthProps) {
         localStorage.setItem("senseclean_user", res.email);
         onLoginSuccess(res.email);
       } else {
-        // Rota de Cadastro
-        await api.post("/auth/register", { email, password });
-        // Se cadastrou com sucesso, muda para a tela de login
+        // 💥 Rota de Cadastro: Agora enviando o invite_code
+        await api.post("/auth/register", { 
+          email, 
+          password, 
+          invite_code: inviteCode 
+        });
+        
         setIsLogin(true);
         setError('');
+        setInviteCode(''); // Limpa o código após sucesso
         alert("Conta criada com sucesso! Faça login para entrar.");
       }
     } catch (err: any) {
-      // Tenta extrair a mensagem de erro amigável do FastAPI
       try {
         const errorData = JSON.parse(err.message);
         setError(errorData.detail || "Erro na autenticação.");
@@ -52,7 +57,6 @@ export function Auth({ onLoginSuccess }: AuthProps) {
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      {/* Logo/Header */}
       <div className="flex items-center gap-3 mb-8">
         <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/20">
           <Video className="text-primary-foreground w-7 h-7" />
@@ -96,9 +100,7 @@ export function Auth({ onLoginSuccess }: AuthProps) {
             </div>
             
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Senha</Label>
-              </div>
+              <Label htmlFor="password">Senha</Label>
               <Input 
                 id="password" 
                 type="password" 
@@ -108,6 +110,24 @@ export function Auth({ onLoginSuccess }: AuthProps) {
                 className="bg-background/50"
               />
             </div>
+
+            {/* 💥 NOVO CAMPO: Código de Convite (Aparece apenas no Registro) */}
+            {!isLogin && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                <Label htmlFor="inviteCode" className="flex items-center gap-2">
+                  <Ticket className="w-3 h-3 text-primary" /> Código de Convite
+                </Label>
+                <Input 
+                  id="inviteCode" 
+                  type="text" 
+                  placeholder="Digite o código enviado pela Sense" 
+                  required
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  className="bg-primary/5 border-primary/20"
+                />
+              </div>
+            )}
           </CardContent>
           
           <CardFooter className="flex flex-col space-y-4">

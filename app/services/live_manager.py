@@ -136,13 +136,13 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
     try:
         # 1. TRADUÇÃO E REGISTRO NO GO2RTC
         stream_name = f"camera_{device_id}"
-        go2rtc_api = "http://127.0.0.1:1984/api/streams"
+        go2rtc_api = "http://go2rtc:1984/api/streams"
         
-        # Traduz 127.0.0.1 para host.docker.internal para o go2rtc (Docker) conseguir ver o SIM Next
-        rtsp_for_go2rtc = rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
+        # Traduz go2rtc para host.docker.internal para o go2rtc (Docker) conseguir ver o SIM Next
+        rtsp_for_go2rtc = rtsp_url.replace("go2rtc", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
         
         # Nossa URL de consumo será o go2rtc local
-        local_rtsp = f"rtsp://127.0.0.1:8554/{stream_name}"
+        local_rtsp = f"rtsp://go2rtc:8554/{stream_name}"
         
         try:
             requests.put(go2rtc_api, params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=3)
