@@ -121,13 +121,14 @@ async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db),
     repo = DeviceRepository(db)
     
     url_ch1 = f"rtsp://{safe_user}:{safe_pass}@{dev.ip_address}:{dev.port}{path_template.format(ch=1)}"
-    existing_dev = next((d for d in repo.get_all() if d.rtsp_url == url_ch1), None)
+    existing_dev = next((d for d in repo.get_all(user_id=current_user.id) if d.rtsp_url == url_ch1), None)
     
     if not existing_dev:
         new_dev = repo.create(
             ip_address=dev.ip_address, port=dev.port, 
             username=dev.username, password=dev.password, 
-            rtsp_url=url_ch1, manufacturer=manufacturer
+            rtsp_url=url_ch1, manufacturer=manufacturer,
+            user_id=current_user.id
         )
         if is_multi:
             config_update = DeviceUpdate(name=f"Cam {dev.ip_address.split('.')[-1]} - Canal 1")
@@ -158,13 +159,14 @@ async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db),
         for res in results:
             if res:
                 ch_num, url = res
-                existing_ch = next((d for d in repo.get_all() if d.rtsp_url == url), None)
+                existing_ch = next((d for d in repo.get_all(user_id=current_user.id) if d.rtsp_url == url), None)
                 if not existing_ch:
                     print(f"   ✅ Canal {ch_num} Ativo! Salvando...")
                     dev_ch = repo.create(
                         ip_address=dev.ip_address, port=dev.port, 
                         username=dev.username, password=dev.password, 
-                        rtsp_url=url, manufacturer=manufacturer
+                        rtsp_url=url, manufacturer=manufacturer,
+                        user_id=current_user.id
                     )
                     config_update = DeviceUpdate(name=f"Cam {dev.ip_address.split('.')[-1]} - Canal {ch_num}")
                     repo.update(dev_ch.id, config_update)

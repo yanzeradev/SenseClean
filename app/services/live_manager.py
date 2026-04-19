@@ -88,7 +88,7 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
             # 2. Verificação de Agendamento no Banco de Dados
             db = SessionLocal()
             device_repo = DeviceRepository(db)
-            devices = [d for d in device_repo.get_all() if d.is_configured]
+            devices = [d for d in device_repo.get_all_system_devices() if d.is_configured]
             
             now = datetime.now()
             current_time_str = now.strftime("%H:%M")
