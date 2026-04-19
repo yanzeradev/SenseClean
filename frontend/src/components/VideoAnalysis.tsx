@@ -49,9 +49,6 @@ export function VideoAnalysis() {
     }
     if (!frameDims || !videoId) return;
 
-    setStage('processing');
-    setProgress(0);
-
     try {
       await api.post("/videos/process", {
         video_id: videoId,
@@ -60,6 +57,10 @@ export function VideoAnalysis() {
         passerby_line_points: passerbyPoints,
         frame_dimensions: frameDims
       });
+      
+      setStage('processing');
+      setProgress(0);
+      
     } catch (err: any) {
       alert("Erro ao processar: " + err.message);
       setStage('error');
