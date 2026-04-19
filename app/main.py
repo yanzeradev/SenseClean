@@ -40,8 +40,7 @@ async def lifespan(app: FastAPI):
 # Passamos o lifespan para o FastAPI
 app = FastAPI(
     title="SenseClean API", 
-    lifespan=lifespan,
-    root_path="/api"  
+    lifespan=lifespan
 )
 
 origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
