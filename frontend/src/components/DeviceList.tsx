@@ -79,7 +79,7 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
 };
 
 const SnapshotViewer = ({ deviceId }: { deviceId: number }) => {
-  const [url, setUrl] = useState(`http://127.0.0.1:8000/devices/${deviceId}/snapshot?t=${Date.now()}`);
+  const [url, setUrl] = useState(`/api/devices/${deviceId}/snapshot?t=${Date.now()}`);
   const [isError, setIsError] = useState(false);
   const [isLoading, setIsLoading] = useState(true); // 💥 NOVO ESTADO
 
@@ -87,7 +87,7 @@ const SnapshotViewer = ({ deviceId }: { deviceId: number }) => {
     setIsError(true);
     setIsLoading(false);
     setTimeout(() => {
-      setUrl(`http://127.0.0.1:8000/devices/${deviceId}/snapshot?t=${Date.now()}`);
+      setUrl(`/api/devices/${deviceId}/snapshot?t=${Date.now()}`);
       setIsError(false);
       setIsLoading(true);
     }, 3000);
@@ -204,7 +204,7 @@ export function DeviceList() {
       }
       
       // Adiciona o Timestamp para o navegador não puxar a foto do cache velho
-      setSnapshotUrl(`http://127.0.0.1:8000/devices/${dev.id}/snapshot?t=${new Date().getTime()}`);
+      setSnapshotUrl(`/api/devices/${dev.id}/snapshot?t=${new Date().getTime()}`);
       setShowConfigModal(true);
   };
 
@@ -228,7 +228,7 @@ export function DeviceList() {
   const handleViewStream = async (dev: any) => {
     try {
       const res = await api.get(`/devices/${dev.id}/stream-camera`);
-      const go2rtcUrl = `http://127.0.0.1:1984/api/stream.mp4?src=${res.stream_name}`;
+      const go2rtcUrl = `/live/api/stream.mp4?src=${res.stream_name}`;
       setStreamUrl(go2rtcUrl);
       setViewingDevice(dev);
     } catch (e) { alert("Erro ao iniciar o stream da câmera."); }

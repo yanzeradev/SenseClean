@@ -236,7 +236,7 @@ export function VideoAnalysis() {
 
               <div className="relative rounded-lg overflow-hidden bg-black aspect-video flex justify-center items-center border border-border">
                 {stage === 'processing' && videoId ? (
-                  <img src={`/videos/${videoId}/stream`} alt="Stream" className="w-full h-full object-contain" />
+                  <img src={`/api/videos/${videoId}/stream`} alt="Stream" className="w-full h-full object-contain" />
                 ) : (
                   <div className="text-center p-6">
                     <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />

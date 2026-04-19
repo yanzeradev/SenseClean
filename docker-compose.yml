@@ -2,8 +2,9 @@ services:
   go2rtc:
     image: alexxit/go2rtc:latest
     container_name: sense_go2rtc
-    
     restart: unless-stopped
+    extra_hosts:                           
+      - "host.docker.internal:host-gateway"
 
   db:
     image: postgres:15-alpine
@@ -26,6 +27,8 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${JWT_SECRET_KEY}
       - REGISTRATION_INVITE_CODE=${REGISTRATION_INVITE_CODE}
+    extra_hosts:                               
+      - "host.docker.internal:host-gateway"     
     depends_on:
       - db
       - go2rtc
