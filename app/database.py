@@ -1,14 +1,9 @@
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://sense_user:sense_password@localhost:5433/sensevision"
-)
-
-# Removemos o connect_args={"check_same_thread": False}, pois o Postgres não precisa disso
-engine = create_engine(DATABASE_URL)
+SQLALCHEMY_DATABASE_URL = "sqlite:///./sensevision.db"
+# "check_same_thread": False is needed only for SQLite. It's not needed for other databases.
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

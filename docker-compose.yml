@@ -3,49 +3,7 @@ services:
     image: alexxit/go2rtc:latest
     container_name: sense_go2rtc
     ports:
-      - "1984:1984" 
-      - "8554:8554" 
-      - "8555:8555" 
+      - "1984:1984" # API e Web Interface
+      - "8554:8554" # RTSP Server
+      - "8555:8555" # WebRTC
     restart: unless-stopped
-
-  db:
-    image: postgres:15-alpine
-    container_name: sense_db
-    environment:
-      POSTGRES_USER: sense_user
-      POSTGRES_PASSWORD: sense_password
-      POSTGRES_DB: sensevision
-    ports:
-      - "5433:5432"
-    restart: unless-stopped
-    volumes:
-      # Garante que os dados do banco não sumam se o PC reiniciar
-      - postgres_data:/var/lib/postgresql/data
-
-  backend:
-    build: .
-    container_name: sense_backend
-    ports:
-      - "8000:8000"
-    environment:
-      # O backend agora conecta no banco chamando ele pelo nome do container (db) e na porta padrão (5432) interna
-      - DATABASE_URL=postgresql+psycopg://sense_user:sense_password@db:5432/sensevision
-    depends_on:
-      - db
-      - go2rtc
-    restart: unless-stopped
-    volumes:
-      # Garante que os vídeos salvos não sumam se o container reiniciar
-      - ./static:/app/static
-
-  frontend:
-    build: ./frontend
-    container_name: sense_frontend
-    ports:
-      - "5173:80" # Mapeia a porta do Nginx (80) para a 5173 que você já usa
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
