@@ -88,7 +88,7 @@ export function Dashboard() {
             {/* Imagem de Capa do Vídeo */}
             <div className="relative aspect-video bg-black border-b border-gray-800">
               <img 
-                src={`http://127.0.0.1:8000/static/frames/${vid.id}.jpg`} 
+                src={`/static/frames/${vid.id}.jpg`} 
                 alt="Thumbnail"
                 className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity"
                 onError={(e) => {
@@ -146,7 +146,7 @@ export function Dashboard() {
                 onClick={() => {
                   // Força o navegador a baixar em vez de tentar abrir na aba
                   const a = document.createElement('a');
-                  a.href = `http://127.0.0.1:8000/static/output_videos/${vid.id}.webm`;
+                  a.href = `/static/output_videos/${vid.id}.webm`;
                   a.download = `video_${vid.id}.webm`;
                   a.click();
                 }}
@@ -159,7 +159,7 @@ export function Dashboard() {
                 disabled={vid.status !== 'completed'}
                 onClick={() => {
                   const a = document.createElement('a');
-                  a.href = `http://127.0.0.1:8000/static/reports/${vid.id}_report.xlsx`;
+                  a.href = `/static/reports/${vid.id}_report.xlsx`;
                   a.download = `relatorio_${vid.id}.xlsx`;
                   a.click();
                 }}

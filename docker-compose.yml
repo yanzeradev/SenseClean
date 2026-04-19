@@ -25,6 +25,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${JWT_SECRET_KEY}
+      - REGISTRATION_INVITE_CODE=${REGISTRATION_INVITE_CODE}
     depends_on:
       - db
       - go2rtc
