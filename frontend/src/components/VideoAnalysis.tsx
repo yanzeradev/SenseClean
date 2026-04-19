@@ -35,7 +35,7 @@ export function VideoAnalysis() {
     try {
       const data = await api.upload("/videos/upload", file);
       setVideoId(data.video_id);
-      setFirstFrameUrl(data.first_frame_url);
+      setFirstFrameUrl("/api" + data.first_frame_url); 
       setStage('drawing');
     } catch (err: any) {
       alert("Erro ao enviar vídeo: " + err.message);
