@@ -192,6 +192,11 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
 @router.get("/{device_id}/snapshot")
 def get_snapshot(device_id: int, db: Session = Depends(get_db)):
     """Retorna uma imagem estática (JPEG) da câmera para o Canvas de desenho do Frontend."""
+    
+    from app.services.live_manager import latest_frames
+    if device_id in latest_frames:
+        return Response(content=latest_frames[device_id], media_type="image/jpeg")
+
     repo = DeviceRepository(db)
     dev = repo.get_by_id(device_id)
     if not dev: raise HTTPException(404, "Câmera não encontrada")

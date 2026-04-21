@@ -20,6 +20,7 @@ from app.vision.interfaces import BaseDetector, BaseTracker
 monitor_queues: Dict[int, asyncio.Queue] = {} 
 active_tasks: Dict[int, asyncio.Task] = {}
 stop_signals: Dict[int, asyncio.Event] = {} 
+latest_frames: Dict[int, bytes] = {}
 
 async def restart_camera(device_id: int):
     """
@@ -98,7 +99,13 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
                     continue
                 
                 start, end = dev.processing_start_time, dev.processing_end_time
-                is_time = start <= current_time_str < end
+                
+                if start <= end:
+                    # Turno normal (ex: 08:00 às 18:00)
+                    is_time = start <= current_time_str < end
+                else:
+                    # Turno de madrugada (ex: 18:00 às 08:00)
+                    is_time = current_time_str >= start or current_time_str < end
                 
                 # INICIAR
                 if is_time and dev.id not in active_tasks:
@@ -128,9 +135,24 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
     O Processo isolado que gerencia 1 câmera ao vivo.
     """
     db = SessionLocal()
-    video_repo = VideoRepository(db)
+    
+    from app.models.video import Video
+    from app.repositories.device import DeviceRepository
+    
+    dev = DeviceRepository(db).get_by_id(device_id)
+    user_id = dev.user_id if dev else None
     
     video_id = f"live_{device_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    nova_sessao = Video(
+        id=video_id,
+        original_video_path=f"Live Stream Cam {device_id}",
+        status="live_processing",
+        user_id=user_id
+    )
+    db.add(nova_sessao)
+    db.commit()
+
     process = None
     
     try:
@@ -179,6 +201,7 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
         
         t0 = time.time()
         last_save = time.time()
+        last_snap = 0 
         
         while not stop_event.is_set():
             try:
@@ -192,6 +215,12 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
                 continue
 
             frame = np.frombuffer(raw_frame, np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
+
+            if time.time() - last_snap > 1.0:
+                ret_clean, buffer_clean = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                if ret_clean:
+                    latest_frames[device_id] = buffer_clean.tobytes()
+                last_snap = time.time()
 
             # --- PROCESSAMENTO IA OFF-LOADED ---
             detections = await asyncio.to_thread(detector.detect, frame)
@@ -254,6 +283,7 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
         if process: process.terminate()
         db.close()
         if device_id in monitor_queues: del monitor_queues[device_id]
+        if device_id in latest_frames: del latest_frames[device_id]
         
         try:
             with SessionLocal() as db_final:
