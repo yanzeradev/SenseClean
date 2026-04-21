@@ -140,6 +140,8 @@ export function DeviceList() {
   // Config Form States
   const [authForm, setAuthForm] = useState({ ip: '', username: 'admin', password: '', port: '554' });
   const [configForm, setConfigForm] = useState({ name: '', start: '08:00', end: '18:00' });
+  const [isConnecting, setIsConnecting] = useState(false);
+
   // Drawing Canvas States
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
   const [entrantPoints, setEntrantPoints] = useState<Point[]>([]);
@@ -168,6 +170,7 @@ export function DeviceList() {
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsConnecting(true);
     try {
       await api.post('/devices/autodiscover', { 
         ip_address: authForm.ip, username: authForm.username, password: authForm.password, port: authForm.port || '554' 
@@ -175,7 +178,11 @@ export function DeviceList() {
       setShowAuthModal(false);
       loadDevices();
       alert("Câmera adicionada com sucesso!");
-    } catch (e: any) { alert("Falha ao conectar: " + e.message); }
+    } catch (e: any) { 
+      alert("Falha ao conectar: " + e.message); 
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -380,8 +387,18 @@ export function DeviceList() {
                   <div><label className="text-xs text-gray-400">Senha</label><Input type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm, password: e.target.value})} required /></div>
                 </div>
                 <div className="flex gap-2 pt-4">
-                  <Button type="button" variant="outline" className="flex-1" onClick={()=>setShowAuthModal(false)}>Cancelar</Button>
-                  <Button type="submit" className="flex-1 bg-blue-600">Conectar</Button>
+                  <Button type="button" variant="outline" className="flex-1" onClick={()=>setShowAuthModal(false)} disabled={isConnecting}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" className="flex-1 bg-blue-600" disabled={isConnecting}>
+                    {isConnecting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Conectando...
+                      </>
+                    ) : (
+                      "Conectar"
+                    )}
+                  </Button>
                 </div>
               </form>
             </CardContent>
