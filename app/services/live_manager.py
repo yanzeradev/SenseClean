@@ -140,10 +140,17 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
     dev = DeviceRepository(db).get_by_id(device_id)
     user_id = dev.user_id if dev else None
     
-    video_id = f"live_{device_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    nova_sessao = Video(id=video_id, original_video_path=f"Live Stream Cam {device_id}", status="live_processing", user_id=user_id)
-    db.add(nova_sessao)
-    db.commit()
+    repo_inicial = VideoRepository(db)
+    sessao_diaria = repo_inicial.get_or_create_daily_session(device_id, user_id)
+    video_id = sessao_diaria.id
+    
+    bagagem_resultados = sessao_diaria.results or {
+        "entrantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
+        "passantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
+        "total_geral": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
+    }
+    bagagem_entrantes = bagagem_resultados.get("entrantes", {}).get("Total", 0)
+    bagagem_passantes = bagagem_resultados.get("passantes", {}).get("Total", 0)
 
     try:
         # 1. TRADUÇÃO GO2RTC
@@ -168,11 +175,14 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         passerby_line = lines_config.get('passerby', [])
         in_side = lines_config.get('in_side', 'right')
         analytics = ZoneAnalytics(entrant_line, passerby_line, in_side)
+        analytics.counts["entrant"] = bagagem_entrantes
+        analytics.counts["passerby"] = bagagem_passantes
         
         last_save = time.time()
         last_snap = 0
         frame_count = 0
-        
+        last_tracks = []
+
         while not stop_event.is_set():
             # Leitura assíncrona do OpenCV
             ret, frame = await asyncio.to_thread(cap.read)
@@ -180,12 +190,9 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             if not ret:
                 print(f"⚠️ Perda de sinal na câmera {device_id}. Reconectando...")
                 await asyncio.sleep(2)
-                break # Quebra o loop, o scheduler vai limpar a memória e reconectar sozinho!
+                break 
             
-            # Pula alguns frames para manter 15 FPS (suave o suficiente pro Tracker não perder a pessoa, leve pra CPU)
             frame_count += 1
-            if frame_count % 2 != 0:
-                continue
 
             # Snapshot Cache (Sem travar a CPU)
             if time.time() - last_snap > 1.0:
@@ -193,11 +200,13 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 if ret_clean: latest_frames[device_id] = buffer_clean.tobytes()
                 last_snap = time.time()
 
-           # --- PROCESSAMENTO IA (Agora sim, igual ao SenseOpen!) ---
-            tracks = await asyncio.to_thread(tracker.update, None, frame)
-            
-            # Atualiza regras de cruzamento
-            analytics.update(tracks)
+            if frame_count % 3 == 0:
+                tracks = await asyncio.to_thread(tracker.update, None, frame)
+                last_tracks = tracks
+                analytics.update(tracks)
+            else:
+                # Nos frames que a IA descansa, usamos as caixas fantasmas!
+                tracks = last_tracks
 
             if len(tracks) > 0:
                 print(f"👀 CAM {device_id} Vendo {len(tracks)} pessoa(s) | Bounding Box do ID {tracks[0]['track_id']}: {tracks[0]['bbox']}")
@@ -228,13 +237,21 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             # --- SALVAMENTO NO BANCO ---
             if time.time() - last_save > 2:
                 try:
-                    current_results = analytics.get_final_results()
+                    atuais = analytics.get_final_results()
+                    
+                    # 💥 MÁGICA DA MATEMÁTICA: Soma o turno atual com a bagagem do dia
+                    merged_results = {
+                        "entrantes": {k: atuais["entrantes"].get(k, 0) + bagagem_resultados["entrantes"].get(k, 0) for k in bagagem_resultados["entrantes"]},
+                        "passantes": {k: atuais["passantes"].get(k, 0) + bagagem_resultados["passantes"].get(k, 0) for k in bagagem_resultados["passantes"]},
+                        "total_geral": {k: atuais["total_geral"].get(k, 0) + bagagem_resultados.get("total_geral", {}).get(k, 0) for k in bagagem_resultados["entrantes"]}
+                    }
+                    
                     with SessionLocal() as db_save:
                         repo_save = VideoRepository(db_save)
                         repo_save.update_status(video_id, "live_processing")
                         vid = repo_save.get_by_id(video_id)
                         if vid:
-                            vid.results = current_results
+                            vid.results = merged_results # 💥 Salva a soma total!
                             db_save.commit()
                 except Exception as e:
                     print(f"Erro ao salvar estatísticas: {e}")
