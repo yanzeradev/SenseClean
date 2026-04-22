@@ -7,17 +7,18 @@ class YoloTracker(BaseTracker):
     """
     Implementation of BaseTracker using Ultralytics' built-in BoT-SORT/ByteTrack.
     """
-    def __init__(self, model_path: str, tracker_type: str = "botsort.yaml"):
+    def __init__(self, model_path: str, tracker_type: str = "bytetrack.yaml"):
         self.model = YOLO(model_path)
         self.tracker_type = tracker_type
 
     def update(self, detections: np.ndarray, frame: np.ndarray) -> List[Dict[str, Any]]:
-        # Since Ultralytics handles detection + tracking in one call, 
-        # for this specific wrapper, we run the track method directly.
-        # In a fully decoupled ReID setup (like your legacy code), 
-        # this method would merge the external detections with ReID embeddings.
-        
-        results = self.model.track(frame, persist=True, tracker=self.tracker_type, verbose=False)
+        results = self.model.track(
+            frame, 
+            persist=True, 
+            tracker=self.tracker_type, 
+            imgsz=480, 
+            verbose=False
+        )
         
         tracked_objects = []
         if len(results) > 0 and results[0].boxes is not None and results[0].boxes.id is not None:

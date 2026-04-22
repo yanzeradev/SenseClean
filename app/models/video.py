@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, DateTime, JSON, Integer
-from datetime import datetime, timezone
+from datetime import datetime
 from app.database import Base
 import uuid
 
@@ -25,4 +25,4 @@ class Video(Base):
     results = Column(JSON, nullable=True)
     
     # Automatically track when the record was created
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.now)

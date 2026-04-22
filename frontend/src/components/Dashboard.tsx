@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FileSpreadsheet, Download, Clock, AlertCircle, RefreshCw, Video, Camera, Activity } from "lucide-react";
+import { FileSpreadsheet, Download, Clock, AlertCircle, RefreshCw, Video, Camera, Activity, Eye, X } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface VideoHistory {
@@ -21,6 +21,7 @@ interface VideoHistory {
 export function Dashboard() {
   const [videos, setVideos] = useState<VideoHistory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewingStream, setViewingStream] = useState<string | null>(null);
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -147,10 +148,20 @@ export function Dashboard() {
                       </p>
                     </CardContent>
 
-                    <CardFooter className="pt-3 pb-3 bg-gray-950 border-t border-gray-800">
+                    <CardFooter className="pt-3 pb-3 bg-gray-950 border-t border-gray-800 flex gap-2">
+                      
+                      <Button 
+                        variant="outline" 
+                        className="flex-1 gap-2 text-xs bg-blue-900/20 text-blue-400 hover:bg-blue-900/40 border-blue-900/50"
+                        disabled={!isLive}
+                        onClick={() => setViewingStream(`/api/devices/${devId}/monitor_stream`)}
+                      >
+                        <Eye className="w-4 h-4" /> Ver IA
+                      </Button>
+
                       <Button 
                         variant="secondary" 
-                        className="w-full gap-2 text-xs bg-green-900/20 text-green-400 hover:bg-green-900/40"
+                        className="flex-1 gap-2 text-xs bg-green-900/20 text-green-400 hover:bg-green-900/40"
                         disabled={!session.results}
                         onClick={() => {
                           const a = document.createElement('a');
@@ -159,7 +170,7 @@ export function Dashboard() {
                           a.click();
                         }}
                       >
-                        <FileSpreadsheet className="w-4 h-4" /> Baixar Excel
+                        <FileSpreadsheet className="w-4 h-4" /> Excel
                       </Button>
                     </CardFooter>
                   </Card>
@@ -250,6 +261,24 @@ export function Dashboard() {
           )}
         </TabsContent>
       </Tabs>
+      {viewingStream && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" onClick={() => setViewingStream(null)}>
+          <div className="relative w-full max-w-4xl bg-black border border-gray-700 rounded-xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Activity className="w-4 h-4 text-blue-500 animate-pulse" /> Visão da IA em Tempo Real
+              </h3>
+              <Button variant="ghost" size="icon" onClick={() => setViewingStream(null)} className="text-gray-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+            <div className="aspect-video w-full bg-gray-900 flex items-center justify-center">
+              {/* Usamos a tag <img> porque o backend manda um stream MJPEG contínuo */}
+              <img src={viewingStream} alt="Live AI Stream" className="w-full h-full object-contain" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

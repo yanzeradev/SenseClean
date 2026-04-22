@@ -231,22 +231,22 @@ async def monitor_stream(device_id: int, db: Session = Depends(get_db)):
     stream_name = f"camera_{dev.id}"
 
     async def frame_generator():
+        from app.services.live_manager import live_frames
+        
         while True:
             # 1. TENTA PEGAR O VÍDEO COM AS CAIXAS VERDES DA IA
-            if device_id in live_manager.monitor_queues:
-                q = live_manager.monitor_queues[device_id]
-                try:
-                    frame_bytes = await asyncio.wait_for(q.get(), timeout=1.0)
-                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    continue
-                except: pass
+            if device_id in live_frames:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + live_frames[device_id] + b'\r\n')
+                # 💥 Damos uma micropausa para transmitir a 10 FPS (salva a CPU do seu navegador)
+                await asyncio.sleep(0.1) 
+                continue
             
             # 2. IA DESLIGADA? TENTA PEGAR O FRAME LIMPO DA CÂMERA (VIA GO2RTC)
             try:
                 res = await asyncio.to_thread(requests.get, f"http://go2rtc:1984/api/frame.jpeg?src={stream_name}", timeout=2)
                 if res.status_code == 200:
                     yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + res.content + b'\r\n')
-                    await asyncio.sleep(1.0) # Puxa 1 frame por segundo para não pesar o dashboard
+                    await asyncio.sleep(1.0) # Puxa 1 frame por segundo quando a IA estiver dormindo
                     continue
             except Exception:
                 pass
