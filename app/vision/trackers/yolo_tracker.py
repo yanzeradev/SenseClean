@@ -16,7 +16,9 @@ class YoloTracker(BaseTracker):
             frame, 
             persist=True, 
             tracker=self.tracker_type, 
-            imgsz=480, 
+            imgsz=640,   
+            conf=0.45,   
+            iou=0.5,    
             verbose=False
         )
         
