@@ -30,7 +30,36 @@ export function Dashboard() {
 
   useEffect(() => { fetchHistory(); }, []);
 
-  const liveSessions = videos.filter(v => v.id.startsWith('daily_'));
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const todayStr = `${yyyy}${mm}${dd}`;
+
+  // 1. Filtra só as sessões de hoje
+  const todaysSessions = videos.filter(v => 
+    v.id.startsWith('daily_') && v.id.endsWith(todayStr)
+  );
+
+  // 2. Agrupa pelo ID da Câmera (Garante que nunca terá 2 cards da mesma câmera)
+  const uniqueLiveSessionsMap = new Map();
+  todaysSessions.forEach(session => {
+    // Extrai o número da câmera (ex: tira de "daily_cam1_20260423" o número "1")
+    const camId = session.id.split('_')[1]; 
+    
+    // Se essa câmera já está no Map, compara as datas de criação (pega a mais nova)
+    if (uniqueLiveSessionsMap.has(camId)) {
+        const existingSession = uniqueLiveSessionsMap.get(camId);
+        if (new Date(session.created_at) > new Date(existingSession.created_at)) {
+            uniqueLiveSessionsMap.set(camId, session);
+        }
+    } else {
+        uniqueLiveSessionsMap.set(camId, session);
+    }
+  });
+
+  // 3. Converte o Map de volta para um Array limpo
+  const liveSessions = Array.from(uniqueLiveSessionsMap.values());
 
   if (loading && videos.length === 0) {
     return (

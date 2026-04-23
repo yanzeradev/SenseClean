@@ -240,10 +240,19 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     atuais = analytics.get_final_results()
                     
                     # 💥 MÁGICA DA MATEMÁTICA: Soma o turno atual com a bagagem do dia
+                    old_events = bagagem_resultados.get("recent_events", [])
+                    new_events = atuais.get("recent_events", [])
+                    
+                    # Combina as duas listas e remove duplicatas baseadas no horário
+                    all_events = {e["time"]: e for e in old_events + new_events}.values()
+                    # Transforma de volta em lista e ordena do mais novo pro mais velho
+                    combined_events = sorted(list(all_events), key=lambda x: x["time"], reverse=True)
+
                     merged_results = {
                         "entrantes": {k: atuais["entrantes"].get(k, 0) + bagagem_resultados["entrantes"].get(k, 0) for k in bagagem_resultados["entrantes"]},
                         "passantes": {k: atuais["passantes"].get(k, 0) + bagagem_resultados["passantes"].get(k, 0) for k in bagagem_resultados["passantes"]},
-                        "total_geral": {k: atuais["total_geral"].get(k, 0) + bagagem_resultados.get("total_geral", {}).get(k, 0) for k in bagagem_resultados["entrantes"]}
+                        "total_geral": {k: atuais["total_geral"].get(k, 0) + bagagem_resultados.get("total_geral", {}).get(k, 0) for k in bagagem_resultados["entrantes"]},
+                        "recent_events": combined_events # 💥 Salva o caderninho inteiro do dia!
                     }
                     
                     with SessionLocal() as db_save:
