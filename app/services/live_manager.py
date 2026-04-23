@@ -21,6 +21,7 @@ live_frames: Dict[int, bytes] = {}
 active_tasks: Dict[int, asyncio.Task] = {}
 stop_signals: Dict[int, asyncio.Event] = {} 
 latest_frames: Dict[int, bytes] = {}
+heatmap_data: Dict[int, list] = {}
 
 async def restart_camera(device_id: int):
     """
@@ -199,13 +200,29 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 ret_clean, buffer_clean = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
                 if ret_clean: latest_frames[device_id] = buffer_clean.tobytes()
                 last_snap = time.time()
+            qtd_cameras = max(1, len(active_tasks))
+            
+            marcha_ia = qtd_cameras * 3
 
-            if frame_count % 3 == 0:
+            if frame_count % marcha_ia == 0:
                 tracks = await asyncio.to_thread(tracker.update, None, frame)
                 last_tracks = tracks
                 analytics.update(tracks)
+
+                if lines_config.get("modules", {}).get("heatmap", False):
+                    if device_id not in heatmap_data:
+                        heatmap_data[device_id] = []
+                    
+                    for t in tracks:
+                        # Pega o ponto central dos pés da pessoa (base inferior do bounding box)
+                        cx = int((t["bbox"][0] + t["bbox"][2]) / 2)
+                        cy = int(t["bbox"][3]) 
+                        heatmap_data[device_id].append((cx, cy))
+                    
+                    # Limita a memória a 10.000 pontos para a RAM do seu servidor Oracle não explodir
+                    if len(heatmap_data[device_id]) > 10000:
+                        heatmap_data[device_id] = heatmap_data[device_id][-10000:]
             else:
-                # Nos frames que a IA descansa, usamos as caixas fantasmas!
                 tracks = last_tracks
 
             if len(tracks) > 0:
@@ -239,20 +256,21 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 try:
                     atuais = analytics.get_final_results()
                     
-                    # 💥 MÁGICA DA MATEMÁTICA: Soma o turno atual com a bagagem do dia
                     old_events = bagagem_resultados.get("recent_events", [])
                     new_events = atuais.get("recent_events", [])
                     
-                    # Combina as duas listas e remove duplicatas baseadas no horário
-                    all_events = {e["time"]: e for e in old_events + new_events}.values()
-                    # Transforma de volta em lista e ordena do mais novo pro mais velho
-                    combined_events = sorted(list(all_events), key=lambda x: x["time"], reverse=True)
+                    # Apenas junta as listas e pega os 100 últimos. 
+                    # Isso evita o bug de deletar quem passa no mesmo exato segundo!
+                    combined_events = sorted(old_events + new_events, key=lambda x: x["time"], reverse=True)[:100]
+
+                    # Usa sempre um dicionário padrão como base para evitar chaves faltantes (KeyError)
+                    base_keys = {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
 
                     merged_results = {
-                        "entrantes": {k: atuais["entrantes"].get(k, 0) + bagagem_resultados["entrantes"].get(k, 0) for k in bagagem_resultados["entrantes"]},
-                        "passantes": {k: atuais["passantes"].get(k, 0) + bagagem_resultados["passantes"].get(k, 0) for k in bagagem_resultados["passantes"]},
-                        "total_geral": {k: atuais["total_geral"].get(k, 0) + bagagem_resultados.get("total_geral", {}).get(k, 0) for k in bagagem_resultados["entrantes"]},
-                        "recent_events": combined_events # 💥 Salva o caderninho inteiro do dia!
+                        "entrantes": {k: atuais["entrantes"].get(k, 0) + bagagem_resultados.get("entrantes", base_keys).get(k, 0) for k in base_keys},
+                        "passantes": {k: atuais["passantes"].get(k, 0) + bagagem_resultados.get("passantes", base_keys).get(k, 0) for k in base_keys},
+                        "total_geral": {k: atuais.get("total_geral", base_keys).get(k, 0) + bagagem_resultados.get("total_geral", base_keys).get(k, 0) for k in base_keys},
+                        "recent_events": combined_events
                     }
                     
                     with SessionLocal() as db_save:
@@ -273,8 +291,9 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
     finally:
         if 'cap' in locals(): cap.release()
         db.close()
-        if device_id in live_frames: del live_frames[device_id] # 💥 Limpa ao sair
+        if device_id in live_frames: del live_frames[device_id]
         if device_id in latest_frames: del latest_frames[device_id]
+        if device_id in heatmap_data: del heatmap_data[device_id]
         
         try:
             with SessionLocal() as db_final:

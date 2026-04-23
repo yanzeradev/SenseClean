@@ -286,3 +286,57 @@ def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):
         print(f"⚠️ Erro ao contatar Go2RTC: {e}")
 
     return {"stream_name": stream_name}
+
+@router.get("/{device_id}/heatmap")
+async def get_heatmap(device_id: int, db: Session = Depends(get_db)):
+    """Gera o Mapa de Calor fundindo as coordenadas com o último frame da câmera."""
+    from app.services.live_manager import latest_frames, heatmap_data
+    
+    # Se a câmera caiu, ou se ainda não passaram pessoas suficientes (mínimo 10 passos)
+    if device_id not in latest_frames or device_id not in heatmap_data or len(heatmap_data[device_id]) < 10:
+        raise HTTPException(status_code=404, detail="Aguardando dados suficientes para gerar o mapa térmico.")
+
+    frame_bytes = latest_frames[device_id]
+    points = heatmap_data[device_id]
+
+    # 1. Decodifica a imagem original
+    nparr = np.frombuffer(frame_bytes, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=500, detail="Erro ao ler frame.")
+        
+    h, w = frame.shape[:2]
+
+    # 2. Cria uma "Lona" vazia preta (1 canal) do mesmo tamanho da imagem
+    heat_layer = np.zeros((h, w), dtype=np.float32)
+
+    # 3. Pinga uma gota de calor em cada coordenada que alguém pisou
+    for x, y in points:
+        if 0 <= x < w and 0 <= y < h:
+            heat_layer[y, x] += 1
+
+    # 4. MÁGICA: Espalha o calor como um desfoque gigante (Gaussian Blur)
+    # O Sigma=35 define o raio da "mancha" térmica
+    heat_layer = cv2.GaussianBlur(heat_layer, (0, 0), sigmaX=35, sigmaY=35)
+
+    # 5. Normaliza a intensidade de 0 a 255
+    max_val = np.max(heat_layer)
+    if max_val > 0:
+        heat_layer = (heat_layer / max_val) * 255
+    heat_layer = heat_layer.astype(np.uint8)
+
+    # 6. Aplica o filtro de cores de calor (Azul=Frio, Vermelho=Quente)
+    color_map = cv2.applyColorMap(heat_layer, cv2.COLORMAP_JET)
+
+    # 7. Mescla o mapa de calor com a foto original, mas SÓ onde existe calor!
+    # Isso evita que o fundo inteiro da foto fique azul escuro.
+    mask = heat_layer > 10
+    blended = frame.copy()
+    
+    # 60% Mapa de calor + 40% Foto Original = Transparência Perfeita
+    blended[mask] = cv2.addWeighted(color_map, 0.6, frame, 0.4, 0)[mask]
+
+    # Converte de volta para JPEG e manda para o Frontend
+    _, buffer = cv2.imencode('.jpg', blended, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    
+    return Response(content=buffer.tobytes(), media_type="image/jpeg")

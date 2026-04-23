@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Camera, Video, RefreshCw, Activity, Users, ArrowRightToLine, ArrowLeftFromLine, ArrowLeft, Eye, X } from "lucide-react";
+import { Camera, Video, RefreshCw, Activity, Users, ArrowRightToLine, ArrowLeftFromLine, ArrowLeft, Eye, X, Map as MapIcon } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from "@/lib/api";
 
@@ -10,7 +10,10 @@ export function Dashboard() {
   const [videos, setVideos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
-  const [viewingStream, setViewingStream] = useState<string | null>(null); // Controle do Modal da IA
+  
+  // Controles de Modais
+  const [viewingStream, setViewingStream] = useState<string | null>(null);
+  const [viewingHeatmap, setViewingHeatmap] = useState<string | null>(null); // 💥 NOVO
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -36,18 +39,13 @@ export function Dashboard() {
   const dd = String(today.getDate()).padStart(2, '0');
   const todayStr = `${yyyy}${mm}${dd}`;
 
-  // 1. Filtra só as sessões de hoje
   const todaysSessions = videos.filter(v => 
     v.id.startsWith('daily_') && v.id.endsWith(todayStr)
   );
 
-  // 2. Agrupa pelo ID da Câmera (Garante que nunca terá 2 cards da mesma câmera)
   const uniqueLiveSessionsMap = new Map();
   todaysSessions.forEach(session => {
-    // Extrai o número da câmera (ex: tira de "daily_cam1_20260423" o número "1")
     const camId = session.id.split('_')[1]; 
-    
-    // Se essa câmera já está no Map, compara as datas de criação (pega a mais nova)
     if (uniqueLiveSessionsMap.has(camId)) {
         const existingSession = uniqueLiveSessionsMap.get(camId);
         if (new Date(session.created_at) > new Date(existingSession.created_at)) {
@@ -58,7 +56,6 @@ export function Dashboard() {
     }
   });
 
-  // 3. Converte o Map de volta para um Array limpo
   const liveSessions = Array.from(uniqueLiveSessionsMap.values());
 
   if (loading && videos.length === 0) {
@@ -81,17 +78,16 @@ export function Dashboard() {
     const ocupacaoAtual = Math.max(0, entrantes - passantes);
     const totalMovimento = entrantes + passantes;
 
-    // 💥 REMOVIDOS OS DADOS FALSOS - Arrays Vazio
     const chartData: any[] = []; 
-    const recentData: any[] = []; 
+    const recentData: any[] = res.recent_events?.slice(0, 15) || []; 
 
     return (
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
         
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => setSelectedSession(null)} className="rounded-full bg-gray-900 hover:bg-gray-800">
-              <ArrowLeft className="w-5 h-5" />
+            <Button variant="ghost" size="icon" onClick={() => setSelectedSession(null)} className="rounded-full bg-gray-900 hover:bg-gray-800 border-none">
+              <ArrowLeft className="w-5 h-5 text-gray-300" />
             </Button>
             <div>
               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -101,11 +97,16 @@ export function Dashboard() {
             </div>
           </div>
           <div className="flex gap-2">
-            {/* 💥 NOVO BOTÃO: VER CÂMERA IA */}
+            
+            {/* 💥 NOVO BOTÃO: MAPA DE CALOR */}
+            <Button variant="outline" size="sm" onClick={() => setViewingHeatmap(devId)} className="gap-2 bg-purple-900/20 text-purple-400 border-purple-900/50 hover:bg-purple-900/40">
+              <MapIcon className="w-4 h-4" /> Mapa de Calor
+            </Button>
+
             <Button variant="outline" size="sm" onClick={() => setViewingStream(`/api/devices/${devId}/monitor_stream`)} className="gap-2 bg-blue-900/20 text-blue-400 border-blue-900/50 hover:bg-blue-900/40">
               <Eye className="w-4 h-4" /> Ver Câmera IA
             </Button>
-            <Button variant="outline" size="sm" onClick={fetchHistory} className="gap-2">
+            <Button variant="outline" size="sm" onClick={fetchHistory} className="gap-2 bg-gray-900/50 border-gray-700 text-gray-300 hover:text-white hover:bg-gray-800">
               <RefreshCw className="w-4 h-4" /> Atualizar Dados
             </Button>
           </div>
@@ -150,7 +151,6 @@ export function Dashboard() {
             <CardContent className="h-[300px] flex items-center justify-center">
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  {/* ... Código do gráfico aqui futuramente ... */}
                   <div/>
                 </ResponsiveContainer>
               ) : (
@@ -165,8 +165,20 @@ export function Dashboard() {
             </CardHeader>
             <CardContent>
               {recentData.length > 0 ? (
-                <div className="space-y-4">
-                    {/* ... Lista futura aqui ... */}
+                <div className="space-y-4 h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    {recentData.map((item: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between border-b border-gray-800 pb-3 last:border-0">
+                        <div>
+                          <p className={`text-sm font-bold ${item.type === 'Entrada' ? 'text-green-500' : 'text-yellow-500'}`}>
+                            {item.type}
+                          </p>
+                          <p className="text-xs text-gray-400">{item.gender}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm text-gray-300 font-mono">{item.time}</p>
+                        </div>
+                      </div>
+                    ))}
                 </div>
               ) : (
                 <p className="text-gray-500 text-sm text-center py-8">Nenhuma detecção registrada recentemente.</p>
@@ -175,7 +187,7 @@ export function Dashboard() {
           </Card>
         </div>
 
-        {/* 💥 MODAL DA CÂMERA AO VIVO (IGUAL DA ABA ANTIGA) */}
+        {/* MODAL DA CÂMERA AO VIVO */}
         {viewingStream && (
           <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" onClick={() => setViewingStream(null)}>
             <div className="relative w-full max-w-4xl bg-black border border-gray-700 rounded-xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -189,6 +201,53 @@ export function Dashboard() {
               </div>
               <div className="aspect-video w-full bg-gray-900 flex items-center justify-center">
                 <img src={viewingStream} alt="Live AI Stream" className="w-full h-full object-contain" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 💥 NOVO MODAL DO MAPA DE CALOR */}
+        {viewingHeatmap && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" onClick={() => setViewingHeatmap(null)}>
+            <div className="relative w-full max-w-4xl bg-black border border-gray-700 rounded-xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <h3 className="font-bold text-white flex items-center gap-2">
+                  <MapIcon className="w-4 h-4 text-purple-500" /> Mapa de Calor Térmico
+                </h3>
+                <Button variant="ghost" size="icon" onClick={() => setViewingHeatmap(null)} className="text-gray-400 hover:text-white">
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+              <div className="aspect-video w-full bg-gray-900 flex flex-col items-center justify-center relative">
+                
+                {/* Imagem do Heatmap (Se der erro, ele mostra a mensagem bonita abaixo) */}
+                <img 
+                  src={`/api/devices/${viewingHeatmap}/heatmap?t=${Date.now()}`} 
+                  alt="Heatmap" 
+                  className="absolute inset-0 w-full h-full object-contain z-10"
+                  onError={(e) => {
+                    // Esconde a imagem quebrada
+                    (e.target as HTMLImageElement).style.display = 'none';
+                    // Pega a div de loading e mostra ela
+                    const fallback = document.getElementById('heatmap-fallback');
+                    if (fallback) fallback.style.display = 'flex';
+                  }}
+                />
+
+                {/* Mensagem de Fallback (Enquanto a gente não programa o Backend) */}
+                <div id="heatmap-fallback" className="hidden flex-col items-center justify-center text-center p-6 z-0">
+                  <RefreshCw className="w-10 h-10 animate-spin text-purple-500 mb-4 opacity-50" />
+                  <h4 className="text-lg font-bold text-white mb-2">Processando Densidade Térmica</h4>
+                  <p className="text-sm text-gray-400 max-w-md">
+                    A Inteligência Artificial está coletando os rastros de movimentação. O Mapa de Calor será gerado assim que houver dados suficientes.
+                  </p>
+                </div>
+
+              </div>
+              <div className="bg-gray-950 p-3 border-t border-gray-800 flex justify-center gap-4 text-xs text-gray-400">
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-full"></div> Baixo Fluxo</div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div> Médio Fluxo</div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-500 rounded-full"></div> Alto Fluxo</div>
               </div>
             </div>
           </div>
@@ -207,15 +266,15 @@ export function Dashboard() {
           <h2 className="text-2xl font-bold text-white">Painel de Lojas</h2>
           <p className="text-muted-foreground text-sm">Selecione uma câmera para ver o painel detalhado de hoje.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchHistory} className="gap-2">
+        <Button variant="outline" size="sm" onClick={fetchHistory} className="gap-2 bg-gray-900 border-gray-700 hover:bg-gray-800 text-white">
           <RefreshCw className="w-4 h-4" /> Atualizar
         </Button>
       </div>
 
       <Tabs defaultValue="cameras" className="w-full">
-        <TabsList className="grid w-full max-w-[400px] grid-cols-2 mb-6">
-          <TabsTrigger value="cameras" className="gap-2"><Camera className="w-4 h-4"/> Câmeras Diárias</TabsTrigger>
-          <TabsTrigger value="videos" className="gap-2"><Video className="w-4 h-4"/> Uploads</TabsTrigger>
+        <TabsList className="grid w-full max-w-[400px] grid-cols-2 mb-6 bg-gray-900/50">
+          <TabsTrigger value="cameras" className="gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white"><Camera className="w-4 h-4"/> Câmeras Diárias</TabsTrigger>
+          <TabsTrigger value="videos" className="gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white"><Video className="w-4 h-4"/> Uploads</TabsTrigger>
         </TabsList>
 
         <TabsContent value="cameras">
@@ -241,8 +300,8 @@ export function Dashboard() {
                         <Activity className="w-3 h-3 animate-pulse" /> Online Hoje
                       </div>
                     </div>
-                    <CardContent className="p-4 flex flex-col items-center justify-center flex-1">
-                      <h3 className="text-lg font-bold text-white mb-4">Câmera {devId}</h3>
+                    <CardContent className="p-4 flex flex-col flex-1">
+                      <h3 className="text-lg font-bold text-white mb-auto mt-4 text-center">Câmera {devId}</h3>
                       <Button 
                         className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-lg shadow-blue-900/20"
                         onClick={() => setSelectedSession(session)}

@@ -3,12 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Camera, Search, Plus, RefreshCw, Settings, Trash2, Eye, X, PencilLine } from "lucide-react";
+import { Camera, Search, Plus, RefreshCw, Settings, Trash2, Eye, X, PencilLine, Map as MapIcon, ActivitySquare, Timer, ShieldAlert } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Point { x: number; y: number; }
 
-// --- COMPONENTE DE DESENHO (HERDADO DA FASE 1) ---
 const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, activeLine, inSide }: any) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -65,7 +64,6 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
 
     return (
         <div ref={containerRef} className="relative w-full aspect-video rounded-lg overflow-hidden border border-gray-700 bg-black">
-           
             <img 
                 src={imageUrl} 
                 alt="Snapshot" 
@@ -81,7 +79,7 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
 const SnapshotViewer = ({ deviceId }: { deviceId: number }) => {
   const [url, setUrl] = useState(`/api/devices/${deviceId}/snapshot?t=${Date.now()}`);
   const [isError, setIsError] = useState(false);
-  const [isLoading, setIsLoading] = useState(true); // 💥 NOVO ESTADO
+  const [isLoading, setIsLoading] = useState(true);
 
   const handleError = () => {
     setIsError(true);
@@ -95,22 +93,17 @@ const SnapshotViewer = ({ deviceId }: { deviceId: number }) => {
 
   return (
     <div className="relative w-full h-full bg-gray-950 flex items-center justify-center">
-      {/* MENSAGEM DE CARREGANDO */}
       {isLoading && !isError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-gray-900">
           <RefreshCw className="w-5 h-5 animate-spin text-blue-500 mb-2" />
           <span className="text-xs text-gray-400">Carregando imagem...</span>
         </div>
       )}
-
       <img 
-        src={url} 
-        alt="Camera" 
+        src={url} alt="Camera" 
         className={`w-full h-full object-fill transition-opacity duration-500 ${isLoading || isError ? 'opacity-0' : 'opacity-100'}`} 
-        onError={handleError}
-        onLoad={() => setIsLoading(false)}
+        onError={handleError} onLoad={() => setIsLoading(false)}
       />
-
       {isError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950 z-20">
           <RefreshCw className="w-5 h-5 animate-spin text-red-500 mb-2" />
@@ -121,14 +114,11 @@ const SnapshotViewer = ({ deviceId }: { deviceId: number }) => {
   );
 };
 
-  
-
 export function DeviceList() {
   const [devices, setDevices] = useState<any[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scannedIps, setScannedIps] = useState<string[]>([]);
   
-  // Modals state
   const [showAddModal, setShowAuthModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [activeDevice, setActiveDevice] = useState<any>(null);
@@ -137,17 +127,23 @@ export function DeviceList() {
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   
-  // Config Form States
   const [authForm, setAuthForm] = useState({ ip: '', username: 'admin', password: '', port: '554' });
   const [configForm, setConfigForm] = useState({ name: '', start: '08:00', end: '18:00' });
   const [isConnecting, setIsConnecting] = useState(false);
 
-  // Drawing Canvas States
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
   const [entrantPoints, setEntrantPoints] = useState<Point[]>([]);
   const [passerbyPoints, setPasserbyPoints] = useState<Point[]>([]);
   const [activeLine, setActiveLine] = useState<'entrant' | 'passerby'>('entrant');
   const [inSide, setInSide] = useState<'right' | 'left'>('right');
+
+  // 💥 NOVO: Estado dos Módulos de Inteligência
+  const [modules, setModules] = useState({
+    heatmap: false,
+    trails: false,
+    dwell: false,
+    loitering: false
+  });
 
   const loadDevices = async () => {
     try {
@@ -193,7 +189,6 @@ export function DeviceList() {
     } catch (e) {}
   };
 
-  // 💥 FUNÇÃO ATUALIZADA: Puxa o Snapshot e restaura as linhas velhas
   const handleOpenConfig = (dev: any) => {
       setActiveDevice(dev);
       setConfigForm({ 
@@ -206,11 +201,13 @@ export function DeviceList() {
           setEntrantPoints(dev.lines_config.entrant || []);
           setPasserbyPoints(dev.lines_config.passerby || []);
           setInSide(dev.lines_config.in_side || 'right');
+          // Carrega os módulos salvos ou deixa falso como padrão
+          setModules(dev.lines_config.modules || { heatmap: false, trails: false, dwell: false, loitering: false });
       } else {
           setEntrantPoints([]); setPasserbyPoints([]); setInSide('right');
+          setModules({ heatmap: false, trails: false, dwell: false, loitering: false });
       }
       
-      // Adiciona o Timestamp para o navegador não puxar a foto do cache velho
       setSnapshotUrl(`/api/devices/${dev.id}/snapshot?t=${new Date().getTime()}`);
       setShowConfigModal(true);
   };
@@ -218,7 +215,8 @@ export function DeviceList() {
   const handleSaveConfig = async () => {
     if(!activeDevice) return;
     try {
-      const linesConfig = { entrant: entrantPoints, passerby: passerbyPoints, in_side: inSide };
+      // Salva os pontos E os módulos de inteligência ativados
+      const linesConfig = { entrant: entrantPoints, passerby: passerbyPoints, in_side: inSide, modules };
       
       await api.put(`/devices/${activeDevice.id}/config`, {
         name: configForm.name,
@@ -259,7 +257,6 @@ export function DeviceList() {
         </div>
       </div>
 
-      {/* 💥 ÁREA DE CÂMERAS ENCONTRADAS PELO SCANNER */}
       {scannedIps.length > 0 && (
         <div className="bg-blue-950/30 border border-blue-900 rounded-lg p-4 animate-in fade-in slide-in-from-top-4">
           <h3 className="text-sm font-medium text-blue-300 mb-3 flex items-center gap-2">
@@ -268,17 +265,14 @@ export function DeviceList() {
           <div className="flex flex-wrap gap-2">
             {scannedIps.map(ip => (
               <Button 
-                key={ip} 
-                variant="outline" 
+                key={ip} variant="outline" 
                 className="bg-blue-900/40 border-blue-700 text-blue-100 hover:bg-blue-700 hover:text-white"
                 onClick={() => {
-                  // Preenche o formulário automaticamente com o IP clicado e abre o modal!
                   setAuthForm({ ip: ip, username: 'admin', password: '', port: '554' });
                   setShowAuthModal(true);
                 }}
               >
-                <Camera className="w-4 h-4 mr-2" />
-                {ip}
+                <Camera className="w-4 h-4 mr-2" /> {ip}
               </Button>
             ))}
           </div>
@@ -289,7 +283,6 @@ export function DeviceList() {
         {devices.map(dev => (
           <Card key={dev.id} className="bg-gray-900 border-gray-800 flex flex-col overflow-hidden">
             <div className="relative aspect-video bg-black border-b border-gray-800 flex items-center justify-center overflow-hidden">
-             
               <SnapshotViewer deviceId={dev.id} />
               <Badge className="absolute top-2 right-2 bg-green-600 z-10">Online</Badge>
             </div>
@@ -305,7 +298,7 @@ export function DeviceList() {
 
             <div className="bg-gray-950 p-2 flex gap-2 border-t border-gray-800">
               <Button variant="secondary" className="flex-1 gap-2 bg-blue-900/30 text-blue-400 hover:bg-blue-900/50" onClick={() => handleViewStream(dev)}>
-                <Eye className="w-4 h-4" /> Visualizar
+                <Eye className="w-4 h-4" /> Ao Vivo
               </Button>
               <Button variant="secondary" className="flex-1 gap-2" onClick={() => handleOpenConfig(dev)}>
                 <Settings className="w-4 h-4" /> Configurar
@@ -321,9 +314,12 @@ export function DeviceList() {
       {/* MODAL CONFIGURAR */}
       {showConfigModal && activeDevice && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-4xl bg-gray-900 border-gray-700 max-h-[95vh] overflow-y-auto">
-            <CardHeader><CardTitle>Configurar: {activeDevice.name}</CardTitle></CardHeader>
-            <CardContent className="space-y-6">
+          <Card className="w-full max-w-4xl bg-gray-900 border-gray-700 max-h-[95vh] overflow-y-auto custom-scrollbar">
+            <CardHeader className="flex flex-row justify-between items-center border-b border-gray-800 pb-4">
+              <CardTitle>Configurar: {activeDevice.name}</CardTitle>
+              <Button variant="ghost" size="icon" onClick={() => setShowConfigModal(false)}><X className="w-5 h-5"/></Button>
+            </CardHeader>
+            <CardContent className="space-y-6 pt-6">
                
                <div className="space-y-2">
                  <label className="text-xs text-gray-400 font-medium uppercase tracking-wider">Nome da Câmera / Setor</label>
@@ -334,8 +330,64 @@ export function DeviceList() {
                  />
                </div>
 
+               {/* 💥 SEÇÃO 2: MÓDULOS DE INTELIGÊNCIA */}
+               <div className="space-y-3 bg-gray-950/50 p-4 rounded-xl border border-gray-800">
+                 <h3 className="font-medium text-white flex items-center gap-2"><ActivitySquare className="w-4 h-4 text-blue-400"/> Módulos de Inteligência Analítica</h3>
+                 <p className="text-xs text-gray-400 mb-4">A contagem de fluxo (Entradas/Saídas) está sempre ativa. Ative recursos avançados abaixo:</p>
+                 
+                 <div className="grid grid-cols-2 gap-3">
+                   <Button 
+                      variant="outline" 
+                      className={`justify-start gap-3 h-auto py-3 ${modules.heatmap ? 'bg-blue-900/30 border-blue-500 text-blue-100' : 'bg-gray-900 border-gray-700 text-gray-400'}`}
+                      onClick={() => setModules({...modules, heatmap: !modules.heatmap})}
+                    >
+                     <MapIcon className={`w-5 h-5 ${modules.heatmap ? 'text-blue-400' : 'text-gray-500'}`} />
+                     <div className="text-left">
+                       <div className="font-bold text-sm">Mapa de Calor (Heatmap)</div>
+                       <div className="text-[10px] opacity-70">Identifica zonas quentes da loja</div>
+                     </div>
+                   </Button>
+
+                   <Button 
+                      variant="outline" 
+                      className={`justify-start gap-3 h-auto py-3 ${modules.trails ? 'bg-purple-900/30 border-purple-500 text-purple-100' : 'bg-gray-900 border-gray-700 text-gray-400'}`}
+                      onClick={() => setModules({...modules, trails: !modules.trails})}
+                    >
+                     <ActivitySquare className={`w-5 h-5 ${modules.trails ? 'text-purple-400' : 'text-gray-500'}`} />
+                     <div className="text-left">
+                       <div className="font-bold text-sm">Rastros (Tracking Trails)</div>
+                       <div className="text-[10px] opacity-70">Desenha a trajetória do cliente</div>
+                     </div>
+                   </Button>
+
+                   <Button 
+                      variant="outline" 
+                      className={`justify-start gap-3 h-auto py-3 ${modules.dwell ? 'bg-green-900/30 border-green-500 text-green-100' : 'bg-gray-900 border-gray-700 text-gray-400'}`}
+                      onClick={() => setModules({...modules, dwell: !modules.dwell})}
+                    >
+                     <Timer className={`w-5 h-5 ${modules.dwell ? 'text-green-400' : 'text-gray-500'}`} />
+                     <div className="text-left">
+                       <div className="font-bold text-sm">Tempo de Permanência</div>
+                       <div className="text-[10px] opacity-70">Cronometra a atenção na vitrine</div>
+                     </div>
+                   </Button>
+
+                   <Button 
+                      variant="outline" 
+                      className={`justify-start gap-3 h-auto py-3 ${modules.loitering ? 'bg-red-900/30 border-red-500 text-red-100' : 'bg-gray-900 border-gray-700 text-gray-400'}`}
+                      onClick={() => setModules({...modules, loitering: !modules.loitering})}
+                    >
+                     <ShieldAlert className={`w-5 h-5 ${modules.loitering ? 'text-red-400' : 'text-gray-500'}`} />
+                     <div className="text-left">
+                       <div className="font-bold text-sm">Alerta de Vadiagem</div>
+                       <div className="text-[10px] opacity-70">Segurança contra atitudes suspeitas</div>
+                     </div>
+                   </Button>
+                 </div>
+               </div>
+
                <div className="space-y-3">
-                 <h3 className="font-medium text-white">1. Desenhe as Linhas de Contagem</h3>
+                 <h3 className="font-medium text-white">Linhas de Contagem de Fluxo</h3>
                  <div className="flex gap-2 flex-wrap">
                     <Button variant={activeLine === 'entrant' ? 'default' : 'outline'} size="sm" onClick={() => setActiveLine('entrant')} className="gap-2 bg-green-600 hover:bg-green-700 text-white border-none"><PencilLine className="w-4 h-4"/> Entrantes</Button>
                     <Button variant={activeLine === 'passerby' ? 'default' : 'outline'} size="sm" onClick={() => setActiveLine('passerby')} className="gap-2 bg-yellow-600 hover:bg-yellow-700 text-white border-none"><PencilLine className="w-4 h-4"/> Passantes</Button>
@@ -355,16 +407,16 @@ export function DeviceList() {
                </div>
 
                <div className="space-y-3">
-                 <h3 className="font-medium text-white">2. Agendamento da IA</h3>
+                 <h3 className="font-medium text-white">Agendamento da IA</h3>
                  <div className="grid grid-cols-2 gap-4">
-                     <div><label className="text-xs text-gray-400">Hora Início</label><Input type="time" value={configForm.start} onChange={e=>setConfigForm({...configForm, start: e.target.value})} /></div>
-                     <div><label className="text-xs text-gray-400">Hora Fim</label><Input type="time" value={configForm.end} onChange={e=>setConfigForm({...configForm, end: e.target.value})} /></div>
+                     <div><label className="text-xs text-gray-400">Hora Início</label><Input type="time" value={configForm.start} onChange={e=>setConfigForm({...configForm, start: e.target.value})} className="bg-gray-950 border-gray-700" /></div>
+                     <div><label className="text-xs text-gray-400">Hora Fim</label><Input type="time" value={configForm.end} onChange={e=>setConfigForm({...configForm, end: e.target.value})} className="bg-gray-950 border-gray-700" /></div>
                  </div>
                </div>
                
                <div className="flex gap-2 pt-4">
-                  <Button type="button" variant="outline" className="flex-1" onClick={()=>setShowConfigModal(false)}>Cancelar</Button>
-                  <Button type="button" onClick={handleSaveConfig} className="flex-1 bg-green-600">Salvar e Reiniciar IA</Button>
+                  <Button type="button" variant="outline" className="flex-1 bg-transparent border-gray-600" onClick={()=>setShowConfigModal(false)}>Cancelar</Button>
+                  <Button type="button" onClick={handleSaveConfig} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-900/20">Salvar e Reiniciar Câmera</Button>
                 </div>
             </CardContent>
           </Card>
@@ -379,25 +431,19 @@ export function DeviceList() {
             <CardContent>
               <form onSubmit={handleConnect} className="space-y-4">
                 <div className="grid grid-cols-4 gap-4">
-                  <div className="col-span-3"><label className="text-xs text-gray-400">IP da Câmera</label><Input value={authForm.ip} onChange={e=>setAuthForm({...authForm, ip: e.target.value})} required /></div>
-                  <div className="col-span-1"><label className="text-xs text-gray-400">Porta</label><Input value={authForm.port} onChange={e=>setAuthForm({...authForm, port: e.target.value})} placeholder="554" /></div>
+                  <div className="col-span-3"><label className="text-xs text-gray-400">IP da Câmera</label><Input value={authForm.ip} onChange={e=>setAuthForm({...authForm, ip: e.target.value})} required className="bg-gray-950 border-gray-700" /></div>
+                  <div className="col-span-1"><label className="text-xs text-gray-400">Porta</label><Input value={authForm.port} onChange={e=>setAuthForm({...authForm, port: e.target.value})} placeholder="554" className="bg-gray-950 border-gray-700" /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><label className="text-xs text-gray-400">Usuário</label><Input value={authForm.username} onChange={e=>setAuthForm({...authForm, username: e.target.value})} required /></div>
-                  <div><label className="text-xs text-gray-400">Senha</label><Input type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm, password: e.target.value})} required /></div>
+                  <div><label className="text-xs text-gray-400">Usuário</label><Input value={authForm.username} onChange={e=>setAuthForm({...authForm, username: e.target.value})} required className="bg-gray-950 border-gray-700" /></div>
+                  <div><label className="text-xs text-gray-400">Senha</label><Input type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm, password: e.target.value})} required className="bg-gray-950 border-gray-700" /></div>
                 </div>
                 <div className="flex gap-2 pt-4">
-                  <Button type="button" variant="outline" className="flex-1" onClick={()=>setShowAuthModal(false)} disabled={isConnecting}>
+                  <Button type="button" variant="outline" className="flex-1 bg-transparent border-gray-600" onClick={()=>setShowAuthModal(false)} disabled={isConnecting}>
                     Cancelar
                   </Button>
-                  <Button type="submit" className="flex-1 bg-blue-600" disabled={isConnecting}>
-                    {isConnecting ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Conectando...
-                      </>
-                    ) : (
-                      "Conectar"
-                    )}
+                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" disabled={isConnecting}>
+                    {isConnecting ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Conectando...</> : "Conectar"}
                   </Button>
                 </div>
               </form>
