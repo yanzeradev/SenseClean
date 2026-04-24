@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 
 interface Point { x: number; y: number; }
 
-const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, activeLine, inSide }: any) => {
+const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, polygonPoints, setPolygonPoints, activeLine, inSide }: any) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -46,11 +46,25 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
             ctx.clearRect(0, 0, cvs.width, cvs.height);
             drawLine(ctx, entrantPoints, '#22c55e', "Entrantes");
             drawLine(ctx, passerbyPoints, '#eab308', "Passantes");
+            
+            if (polygonPoints.length > 0) {
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.3)'; // Roxo translúcido
+                ctx.strokeStyle = '#a855f7';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                polygonPoints.forEach((p: Point, i: number) => {
+                    i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+                    ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+                });
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            }
         };
 
         if (img.complete) render();
         else img.onload = render;
-    }, [entrantPoints, passerbyPoints, activeLine, imageUrl, inSide]);
+    }, [entrantPoints, passerbyPoints, polygonPoints, activeLine, imageUrl, inSide]);
 
     const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const cvs = canvasRef.current;
@@ -59,7 +73,10 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
         const scaleX = cvs.width / rect.width;
         const scaleY = cvs.height / rect.height;
         const pt = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
-        activeLine === 'entrant' ? setEntrantPoints([...entrantPoints, pt]) : setPasserbyPoints([...passerbyPoints, pt]);
+        
+        if (activeLine === 'entrant') setEntrantPoints([...entrantPoints, pt]);
+        else if (activeLine === 'passerby') setPasserbyPoints([...passerbyPoints, pt]);
+        else setPolygonPoints([...polygonPoints, pt]);
     };
 
     return (
@@ -134,10 +151,10 @@ export function DeviceList() {
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
   const [entrantPoints, setEntrantPoints] = useState<Point[]>([]);
   const [passerbyPoints, setPasserbyPoints] = useState<Point[]>([]);
-  const [activeLine, setActiveLine] = useState<'entrant' | 'passerby'>('entrant');
+  const [polygonPoints, setPolygonPoints] = useState<Point[]>([]);
+  const [activeLine, setActiveLine] = useState<'entrant' | 'passerby' | 'polygon'>('entrant');
   const [inSide, setInSide] = useState<'right' | 'left'>('right');
 
-  // 💥 NOVO: Estado dos Módulos de Inteligência
   const [modules, setModules] = useState({
     heatmap: false,
     trails: false,
@@ -303,6 +320,9 @@ export function DeviceList() {
               <Button variant="secondary" className="flex-1 gap-2" onClick={() => handleOpenConfig(dev)}>
                 <Settings className="w-4 h-4" /> Configurar
               </Button>
+              <Button variant="secondary" className="flex-1 gap-2" onClick={() => handleOpenConfig(dev)}>
+                <Settings className="w-4 h-4" /> Configurar
+              </Button>
               <Button variant="destructive" size="icon" onClick={() => handleDelete(dev.id)}>
                 <Trash2 className="w-4 h-4" />
               </Button>
@@ -392,13 +412,19 @@ export function DeviceList() {
                     <Button variant={activeLine === 'entrant' ? 'default' : 'outline'} size="sm" onClick={() => setActiveLine('entrant')} className="gap-2 bg-green-600 hover:bg-green-700 text-white border-none"><PencilLine className="w-4 h-4"/> Entrantes</Button>
                     <Button variant={activeLine === 'passerby' ? 'default' : 'outline'} size="sm" onClick={() => setActiveLine('passerby')} className="gap-2 bg-yellow-600 hover:bg-yellow-700 text-white border-none"><PencilLine className="w-4 h-4"/> Passantes</Button>
                     <Button variant="outline" size="sm" onClick={() => setInSide(inSide === 'right' ? 'left' : 'right')}><RefreshCw className="w-4 h-4 mr-2"/> Inverter Lado</Button>
-                    <Button variant="destructive" size="sm" onClick={() => activeLine === 'entrant' ? setEntrantPoints([]) : setPasserbyPoints([])}><Trash2 className="w-4 h-4 mr-2"/> Limpar</Button>
+                    <Button variant="destructive" size="sm" onClick={() => {
+                        if (activeLine === 'entrant') setEntrantPoints([]);
+                        else if (activeLine === 'passerby') setPasserbyPoints([]);
+                        else if (activeLine === 'polygon') setPolygonPoints([]);
+                    }}><Trash2 className="w-4 h-4 mr-2"/> Limpar</Button>
+                    <Button variant={activeLine === 'polygon' ? 'default' : 'outline'} size="sm" onClick={() => setActiveLine('polygon')} className="gap-2 bg-purple-600 hover:bg-purple-700 text-white border-none"><MapIcon className="w-4 h-4"/> Zona Dwell</Button>
                  </div>
                  {snapshotUrl ? (
                      <DrawingCanvas 
                         imageUrl={snapshotUrl} 
                         entrantPoints={entrantPoints} setEntrantPoints={setEntrantPoints} 
                         passerbyPoints={passerbyPoints} setPasserbyPoints={setPasserbyPoints} 
+                        polygonPoints={polygonPoints} setPolygonPoints={setPolygonPoints} 
                         activeLine={activeLine} inSide={inSide} 
                      />
                  ) : (

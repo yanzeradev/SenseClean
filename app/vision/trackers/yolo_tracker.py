@@ -7,7 +7,7 @@ class YoloTracker(BaseTracker):
     """
     Implementation of BaseTracker using Ultralytics' built-in BoT-SORT/ByteTrack.
     """
-    def __init__(self, model_path: str, tracker_type: str = "bytetrack.yaml"):
+    def __init__(self, model_path: str, tracker_type: str = "botsort.yaml"):
         self.model = YOLO(model_path)
         self.tracker_type = tracker_type
 
@@ -19,7 +19,9 @@ class YoloTracker(BaseTracker):
             imgsz=640,   
             conf=0.45,   
             iou=0.5,    
-            verbose=False
+            verbose=False,
+            device="cpu",  # Força processamento local
+            half=False     # Desliga FP16 pra não bugar na hora de fundir modelo local
         )
         
         tracked_objects = []

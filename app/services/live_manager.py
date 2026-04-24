@@ -190,8 +190,18 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         box_annotator = sv.BoxAnnotator(thickness=2)
         label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
         
-        track_history = defaultdict(lambda: deque(maxlen=150)) 
+        # Lógica Opcional do PolygonZone
+        polygon_points = lines_config.get('polygon', [])
+        zone = None
+        zone_annotator = None
         
+        if len(polygon_points) >= 3:
+            # Converte as coordenadas do Frontend para o Supervision
+            poly_arr = np.array([[p['x'], p['y']] for p in polygon_points], np.int32)
+            zone = sv.PolygonZone(polygon=poly_arr)
+            zone_annotator = sv.PolygonZoneAnnotator(zone=zone, color=sv.Color.from_hex("#A855F7"), thickness=2)
+        
+        track_history = defaultdict(lambda: deque(maxlen=150)) 
         dwell_timers = {} 
 
         while not stop_event.is_set():
@@ -286,24 +296,32 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 labels = []
                 current_time = time.time()
                 
-                # Limpa cronômetros antigos
+                # Verifica quem está dentro do Polígono (Se ele existir)
+                is_inside = [False] * len(tracks)
+                if zone is not None:
+                    is_inside = zone.trigger(detections=detections)
+                    frame = zone_annotator.annotate(scene=frame) # Desenha a zona translúcida
+
                 for tid in list(dwell_timers.keys()):
                     if tid not in current_ids:
                         del dwell_timers[tid]
 
-                for t_id in tracker_id:
-                    # Se é a primeira vez vendo essa pessoa, inicia o cronômetro!
-                    if t_id not in dwell_timers:
-                        dwell_timers[t_id] = current_time
+                for i, t_id in enumerate(tracker_id):
+                    label = f"ID: {t_id}"
                     
-                    # Calcula quantos segundos se passaram
-                    segundos_na_tela = int(current_time - dwell_timers[t_id])
-                    
-                    # Formata a etiqueta: "ID: 5 (12s)"
                     if lines_config.get("modules", {}).get("dwell", False):
-                        labels.append(f"ID: {t_id} ({segundos_na_tela}s)")
-                    else:
-                        labels.append(f"ID: {t_id}")
+                        # Se não tem zona, ou se a pessoa está DENTRO da zona:
+                        if zone is None or is_inside[i]:
+                            if t_id not in dwell_timers:
+                                dwell_timers[t_id] = current_time
+                            segundos = int(current_time - dwell_timers[t_id])
+                            label += f" ({segundos}s)"
+                        else:
+                            # Se a pessoa saiu da zona, pausa/reseta o cronômetro
+                            if t_id in dwell_timers:
+                                del dwell_timers[t_id]
+                    
+                    labels.append(label)
 
                 # Desenha a Caixa e a Etiqueta
                 frame = box_annotator.annotate(scene=frame, detections=detections)
