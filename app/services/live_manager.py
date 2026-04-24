@@ -188,15 +188,11 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         last_tracks = []
         
         box_annotator = sv.BoxAnnotator(thickness=2)
-        
         label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
-        track_history = defaultdict(lambda: deque(maxlen=150))
         
-        trace_annotator = sv.TraceAnnotator(
-            thickness=2,
-            trace_length=60, # Comprimento do rastro
-            position=sv.Position.CENTER # 💥 Mira no centro (cintura)
-        )
+        track_history = defaultdict(lambda: deque(maxlen=150)) 
+        
+        dwell_timers = {} 
 
         while not stop_event.is_set():
             # Leitura assíncrona do OpenCV
@@ -287,9 +283,30 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                                 # 2. Desenha a bolha arredondada nas emendas para o traço ficar macio
                                 cv2.circle(frame, pt2, thickness // 2, (255, 0, 255), -1, cv2.LINE_AA)
 
-                # 2. Desenha a Caixa Supervision por cima das bolhas
+                labels = []
+                current_time = time.time()
+                
+                # Limpa cronômetros antigos
+                for tid in list(dwell_timers.keys()):
+                    if tid not in current_ids:
+                        del dwell_timers[tid]
+
+                for t_id in tracker_id:
+                    # Se é a primeira vez vendo essa pessoa, inicia o cronômetro!
+                    if t_id not in dwell_timers:
+                        dwell_timers[t_id] = current_time
+                    
+                    # Calcula quantos segundos se passaram
+                    segundos_na_tela = int(current_time - dwell_timers[t_id])
+                    
+                    # Formata a etiqueta: "ID: 5 (12s)"
+                    if lines_config.get("modules", {}).get("dwell", False):
+                        labels.append(f"ID: {t_id} ({segundos_na_tela}s)")
+                    else:
+                        labels.append(f"ID: {t_id}")
+
+                # Desenha a Caixa e a Etiqueta
                 frame = box_annotator.annotate(scene=frame, detections=detections)
-                labels = [f"ID: {t_id}" for t_id in tracker_id]
                 frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
 
             # Mantemos o nosso código nativo para as Linhas de Contagem e Contadores (Verde/Amarelo)
