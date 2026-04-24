@@ -9,6 +9,7 @@ import numpy as np
 import traceback
 from datetime import datetime
 from typing import Dict, Any
+from collections import defaultdict, deque
 
 from app.database import SessionLocal
 from app.repositories.device import DeviceRepository
@@ -166,11 +167,11 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
 
         print(f"🔌 Ingestão OpenCV: {local_rtsp}")
 
-        # 2. INSTÂNCIA OPENCV (Estilo SenseOpen)
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-        cap = cv2.VideoCapture(local_rtsp)
-        # O segredo para não atrasar a imagem ao vivo: Buffer minúsculo
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000|max_delay;5000000"
+        
+        cap = cv2.VideoCapture(local_rtsp, cv2.CAP_FFMPEG)
+        
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
 
         entrant_line = lines_config.get('entrant', [])
         passerby_line = lines_config.get('passerby', [])
@@ -183,6 +184,7 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         last_snap = 0
         frame_count = 0
         last_tracks = []
+        track_history = defaultdict(lambda: deque(maxlen=100)) 
 
         while not stop_event.is_set():
             # Leitura assíncrona do OpenCV
@@ -190,7 +192,7 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             
             if not ret:
                 print(f"⚠️ Perda de sinal na câmera {device_id}. Reconectando...")
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
                 break 
             
             frame_count += 1
@@ -214,9 +216,8 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                         heatmap_data[device_id] = []
                     
                     for t in tracks:
-                        # Pega o ponto central dos pés da pessoa (base inferior do bounding box)
                         cx = int((t["bbox"][0] + t["bbox"][2]) / 2)
-                        cy = int(t["bbox"][3]) 
+                        cy = int((t["bbox"][1] + t["bbox"][3]) / 2) 
                         heatmap_data[device_id].append((cx, cy))
                     
                     # Limita a memória a 10.000 pontos para a RAM do seu servidor Oracle não explodir
@@ -229,10 +230,35 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 print(f"👀 CAM {device_id} Vendo {len(tracks)} pessoa(s) | Bounding Box do ID {tracks[0]['track_id']}: {tracks[0]['bbox']}")
 
             # --- DESENHO EM TELA ---
+            current_ids = [t["track_id"] for t in tracks]
+            
+            # Limpa da memória os rastros de quem já saiu da tela
+            for tid in list(track_history.keys()):
+                if tid not in current_ids:
+                    del track_history[tid]
+
             for track in tracks:
                 x1, y1, x2, y2 = map(int, track["bbox"])
+                tid = track['track_id']
+                
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID: {track['track_id']} ({track.get('class_id', '')})", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv2.putText(frame, f"ID: {tid} ({track.get('class_id', '')})", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
+            
+                if lines_config.get("modules", {}).get("trails", False):
+                    cx = int((x1 + x2) / 2)
+                    cy = int((y1 + y2) / 2) 
+                    
+                    # Só adiciona o ponto na memória se a pessoa andou! (Impede o rastro de encolher)
+                    if len(track_history[tid]) == 0 or track_history[tid][-1] != (cx, cy):
+                        track_history[tid].append((cx, cy))
+                    
+                    history_len = len(track_history[tid])
+                    if history_len > 1:
+                        for i, point in enumerate(track_history[tid]):
+                            radius = int(5 * (i / history_len)) + 1
+                            
+                            cv2.circle(frame, point, radius, (255, 0, 255), -1)
             
             if len(entrant_line) > 1:
                 pts = np.array([ [p['x'], p['y']] for p in entrant_line ], np.int32).reshape((-1, 1, 2))
