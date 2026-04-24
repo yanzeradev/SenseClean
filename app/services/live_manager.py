@@ -10,6 +10,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any
 from collections import defaultdict, deque
+import supervision as sv
 
 from app.database import SessionLocal
 from app.repositories.device import DeviceRepository
@@ -184,7 +185,16 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         last_snap = 0
         frame_count = 0
         last_tracks = []
-        track_history = defaultdict(lambda: deque(maxlen=100)) 
+        
+        box_annotator = sv.BoxAnnotator(thickness=2)
+        
+        label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
+        
+        trace_annotator = sv.TraceAnnotator(
+            thickness=2,
+            trace_length=60, # Comprimento do rastro
+            position=sv.Position.CENTER # 💥 Mira no centro (cintura)
+        )
 
         while not stop_event.is_set():
             # Leitura assíncrona do OpenCV
@@ -230,36 +240,29 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 print(f"👀 CAM {device_id} Vendo {len(tracks)} pessoa(s) | Bounding Box do ID {tracks[0]['track_id']}: {tracks[0]['bbox']}")
 
             # --- DESENHO EM TELA ---
-            current_ids = [t["track_id"] for t in tracks]
-            
-            # Limpa da memória os rastros de quem já saiu da tela
-            for tid in list(track_history.keys()):
-                if tid not in current_ids:
-                    del track_history[tid]
+            if len(tracks) > 0:
+                # 1. Converte a nossa lista do YOLO para o formato oficial do Supervision
+                xyxy = np.array([t["bbox"] for t in tracks])
+                tracker_id = np.array([t["track_id"] for t in tracks])
+                class_id = np.array([t["class_id"] for t in tracks])
+                
+                detections = sv.Detections(
+                    xyxy=xyxy,
+                    tracker_id=tracker_id,
+                    class_id=class_id
+                )
 
-            for track in tracks:
-                x1, y1, x2, y2 = map(int, track["bbox"])
-                tid = track['track_id']
-                
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID: {tid} ({track.get('class_id', '')})", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                
-            
+                # 2. Desenha o Rastro (Se estiver ativado no painel)
                 if lines_config.get("modules", {}).get("trails", False):
-                    cx = int((x1 + x2) / 2)
-                    cy = int((y1 + y2) / 2) 
-                    
-                    # Só adiciona o ponto na memória se a pessoa andou! (Impede o rastro de encolher)
-                    if len(track_history[tid]) == 0 or track_history[tid][-1] != (cx, cy):
-                        track_history[tid].append((cx, cy))
-                    
-                    history_len = len(track_history[tid])
-                    if history_len > 1:
-                        for i, point in enumerate(track_history[tid]):
-                            radius = int(5 * (i / history_len)) + 1
-                            
-                            cv2.circle(frame, point, radius, (255, 0, 255), -1)
-            
+                    frame = trace_annotator.annotate(scene=frame, detections=detections)
+
+                # 3. Desenha a Caixa e a Etiqueta (ID) por cima do rastro
+                frame = box_annotator.annotate(scene=frame, detections=detections)
+                
+                labels = [f"ID: {t_id}" for t_id in tracker_id]
+                frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
+
+            # Mantemos o nosso código nativo para as Linhas de Contagem e Contadores (Verde/Amarelo)
             if len(entrant_line) > 1:
                 pts = np.array([ [p['x'], p['y']] for p in entrant_line ], np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [pts], False, (0, 255, 0), 3)
