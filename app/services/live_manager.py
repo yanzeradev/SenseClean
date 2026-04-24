@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, Any
 from collections import defaultdict, deque
 import supervision as sv
+import math
 
 from app.database import SessionLocal
 from app.repositories.device import DeviceRepository
@@ -189,6 +190,7 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         box_annotator = sv.BoxAnnotator(thickness=2)
         
         label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
+        track_history = defaultdict(lambda: deque(maxlen=150))
         
         trace_annotator = sv.TraceAnnotator(
             thickness=2,
@@ -241,7 +243,6 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
 
             # --- DESENHO EM TELA ---
             if len(tracks) > 0:
-                # 1. Converte a nossa lista do YOLO para o formato oficial do Supervision
                 xyxy = np.array([t["bbox"] for t in tracks])
                 tracker_id = np.array([t["track_id"] for t in tracks])
                 class_id = np.array([t["class_id"] for t in tracks])
@@ -252,13 +253,42 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     class_id=class_id
                 )
 
-                # 2. Desenha o Rastro (Se estiver ativado no painel)
+                # 💥 1. RASTRO ESTILO "COMETA FLUIDO" (Costurando os frames)
                 if lines_config.get("modules", {}).get("trails", False):
-                    frame = trace_annotator.annotate(scene=frame, detections=detections)
+                    current_ids = [t["track_id"] for t in tracks]
+                    for tid in list(track_history.keys()):
+                        if tid not in current_ids:
+                            del track_history[tid]
 
-                # 3. Desenha a Caixa e a Etiqueta (ID) por cima do rastro
+                    for track in tracks:
+                        tid = track['track_id']
+                        # Centro da cintura
+                        cx = int((track["bbox"][0] + track["bbox"][2]) / 2)
+                        cy = int((track["bbox"][1] + track["bbox"][3]) / 2)
+                        
+                        # Guarda a posição (Pode tirar o math.sqrt, queremos todos os frames válidos)
+                        track_history[tid].append((cx, cy))
+                        
+                        history = list(track_history[tid])
+                        history_len = len(history)
+                        
+                        # MÁGICA VISUAL: Preenchendo os buracos
+                        if history_len > 1:
+                            for i in range(1, history_len):
+                                pt1 = history[i - 1]
+                                pt2 = history[i]
+                                
+                                # A espessura cresce suavemente (da ponta mais fina até 10px no corpo da pessoa)
+                                thickness = int(10 * (i / history_len)) + 1
+                                
+                                # 1. Desenha a linha ligando um ponto ao outro (isso tapa o buraco do FPS)
+                                cv2.line(frame, pt1, pt2, (255, 0, 255), thickness, cv2.LINE_AA)
+                                
+                                # 2. Desenha a bolha arredondada nas emendas para o traço ficar macio
+                                cv2.circle(frame, pt2, thickness // 2, (255, 0, 255), -1, cv2.LINE_AA)
+
+                # 2. Desenha a Caixa Supervision por cima das bolhas
                 frame = box_annotator.annotate(scene=frame, detections=detections)
-                
                 labels = [f"ID: {t_id}" for t_id in tracker_id]
                 frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
 
