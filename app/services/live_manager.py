@@ -185,10 +185,12 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         last_save = time.time()
         last_snap = 0
         frame_count = 0
-        last_tracks = []
+        last_tracks = {"analytics_data": [], "sv_detections": None} 
         
         box_annotator = sv.BoxAnnotator(thickness=2)
         label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
+        
+        mask_annotator = sv.MaskAnnotator()
         
         # Lógica Opcional do PolygonZone
         polygon_points = lines_config.get('polygon', [])
@@ -225,10 +227,18 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             marcha_ia = qtd_cameras * 3
 
             if frame_count % marcha_ia == 0:
-                tracks = await asyncio.to_thread(tracker.update, None, frame)
-                last_tracks = tracks
+                # 1. Pega o resultado (que agora é um Dicionário)
+                tracking_result = await asyncio.to_thread(tracker.update, None, frame)
+                last_tracks = tracking_result
+
+                # 2. Extrai a lista de pessoas (analytics_data) e as máscaras (sv_detections)
+                tracks = tracking_result.get("analytics_data", [])
+                sv_detections = tracking_result.get("sv_detections")
+                
+                # 3. Agora sim, mandamos uma LISTA para o analytics, e não o dicionário!
                 analytics.update(tracks)
 
+                # Lógica do Mapa de Calor
                 if lines_config.get("modules", {}).get("heatmap", False):
                     if device_id not in heatmap_data:
                         heatmap_data[device_id] = []
@@ -238,11 +248,18 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                         cy = int((t["bbox"][1] + t["bbox"][3]) / 2) 
                         heatmap_data[device_id].append((cx, cy))
                     
-                    # Limita a memória a 10.000 pontos para a RAM do seu servidor Oracle não explodir
+                    # Limita a memória a 10.000 pontos
                     if len(heatmap_data[device_id]) > 10000:
                         heatmap_data[device_id] = heatmap_data[device_id][-10000:]
             else:
-                tracks = last_tracks
+                # Nos frames pulados, recuperamos da memória com segurança
+                tracking_result = last_tracks
+                if isinstance(tracking_result, dict):
+                    tracks = tracking_result.get("analytics_data", [])
+                    sv_detections = tracking_result.get("sv_detections")
+                else:
+                    tracks = []
+                    sv_detections = None
 
             if len(tracks) > 0:
                 print(f"👀 CAM {device_id} Vendo {len(tracks)} pessoa(s) | Bounding Box do ID {tracks[0]['track_id']}: {tracks[0]['bbox']}")
@@ -310,24 +327,30 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     label = f"ID: {t_id}"
                     
                     if lines_config.get("modules", {}).get("dwell", False):
-                        # Se não tem zona, ou se a pessoa está DENTRO da zona:
                         if zone is None or is_inside[i]:
                             if t_id not in dwell_timers:
                                 dwell_timers[t_id] = current_time
                             segundos = int(current_time - dwell_timers[t_id])
                             label += f" ({segundos}s)"
                         else:
-                            # Se a pessoa saiu da zona, pausa/reseta o cronômetro
                             if t_id in dwell_timers:
                                 del dwell_timers[t_id]
                     
                     labels.append(label)
 
-                # Desenha a Caixa e a Etiqueta
-                frame = box_annotator.annotate(scene=frame, detections=detections)
-                frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
+                # 💥 O GRANDE FINAL: DESENHANDO A SILHUETA
+                # Se as máscaras existirem (Modelo de Segmentação), ele pinta o corpo!
+                if sv_detections.mask is not None:
+                    frame = mask_annotator.annotate(scene=frame, detections=sv_detections)
+                else:
+                    # Se cair aqui, é porque o modelo antigo (Sem Máscara) teimou em rodar!
+                    print("⚠️ AVISO: Máscaras não encontradas! A IA ainda está usando o modelo de Bounding Box.")
+                    frame = box_annotator.annotate(scene=frame, detections=sv_detections)
 
-            # Mantemos o nosso código nativo para as Linhas de Contagem e Contadores (Verde/Amarelo)
+                # Desenha a Etiqueta (ID e Tempo) por cima da silhueta
+                frame = label_annotator.annotate(scene=frame, detections=sv_detections, labels=labels)
+
+            # --- Linhas de Contagem (Verde e Amarelo) ---
             if len(entrant_line) > 1:
                 pts = np.array([ [p['x'], p['y']] for p in entrant_line ], np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [pts], False, (0, 255, 0), 3)
@@ -336,6 +359,7 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 pts = np.array([ [p['x'], p['y']] for p in passerby_line ], np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [pts], False, (0, 255, 255), 3)
 
+            # Placares
             cv2.rectangle(frame, (10, 10), (250, 100), (0, 0, 0), -1)
             cv2.putText(frame, f"Entrantes: {analytics.counts['entrant']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             cv2.putText(frame, f"Passantes: {analytics.counts['passerby']}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
