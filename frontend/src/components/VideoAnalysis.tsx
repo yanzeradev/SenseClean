@@ -21,6 +21,7 @@ export function VideoAnalysis() {
   const [activeLine, setActiveLine] = useState<'entrant' | 'passerby'>('entrant');
   const [inSide, setInSide] = useState<'right' | 'left'>('right');
   const [frameDims, setFrameDims] = useState<FrameDimensions | null>(null);
+  const [imageTimestamp, setImageTimestamp] = useState(Date.now());
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -34,7 +35,7 @@ export function VideoAnalysis() {
     try {
       const data = await api.upload("/videos/upload", file);
       setVideoId(data.video_id);
-      setFirstFrameUrl(data.first_frame_url);
+      setFirstFrameUrl("/api" + data.first_frame_url); 
       setStage('drawing');
     } catch (err: any) {
       alert("Erro ao enviar vídeo: " + err.message);
@@ -48,9 +49,6 @@ export function VideoAnalysis() {
     }
     if (!frameDims || !videoId) return;
 
-    setStage('processing');
-    setProgress(0);
-
     try {
       await api.post("/videos/process", {
         video_id: videoId,
@@ -59,6 +57,10 @@ export function VideoAnalysis() {
         passerby_line_points: passerbyPoints,
         frame_dimensions: frameDims
       });
+      
+      setStage('processing');
+      setProgress(0);
+      
     } catch (err: any) {
       alert("Erro ao processar: " + err.message);
       setStage('error');
@@ -179,10 +181,15 @@ export function VideoAnalysis() {
               <div className="relative rounded-lg overflow-hidden bg-black border border-border">
                 <img 
                   ref={imgRef}
-                  src={`http://127.0.0.1:8000${firstFrameUrl}`} 
+                  src={`${firstFrameUrl}?t=${imageTimestamp}`} 
                   alt="Primeiro Frame"
                   className="w-full h-auto object-contain block"
                   onLoad={(e) => setFrameDims({ width: e.currentTarget.width, height: e.currentTarget.height })}
+                  onError={() => {
+                    setTimeout(() => {
+                      setImageTimestamp(Date.now());
+                    }, 1500);
+                  }}
                 />
                 <canvas
                   ref={canvasRef}
@@ -230,7 +237,7 @@ export function VideoAnalysis() {
 
               <div className="relative rounded-lg overflow-hidden bg-black aspect-video flex justify-center items-center border border-border">
                 {stage === 'processing' && videoId ? (
-                  <img src={`http://127.0.0.1:8000/videos/${videoId}/stream`} alt="Stream" className="w-full h-full object-contain" />
+                  <img src={`/api/videos/${videoId}/stream`} alt="Stream" className="w-full h-full object-contain" />
                 ) : (
                   <div className="text-center p-6">
                     <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />

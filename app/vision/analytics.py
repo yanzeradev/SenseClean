@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 from collections import Counter
 from app.core.geometry import get_point_side
+from datetime import datetime
 
 # Domain mapping for classes (Based on your YOLO model training)
 CLASS_MAPPING = {
@@ -32,6 +33,7 @@ class ZoneAnalytics:
             "entrant": 0,
             "passerby": 0
         }
+        self.recent_events = []
 
     def _get_bbox_center(self, bbox: List[float]) -> tuple[float, float]:
         x1, y1, x2, y2 = bbox
@@ -65,6 +67,11 @@ class ZoneAnalytics:
                     if state['status'] == 'neutral':
                         state['status'] = 'passerby'
                         self.counts["passerby"] += 1
+                        self.recent_events.append({
+                            "type": "Saída", 
+                            "gender": CLASS_MAPPING.get(cls_id, "NaoIdentificado"),
+                            "time": datetime.now().strftime("%H:%M:%S")
+                        })
                 state['last_pass_side'] = curr_pass_side
 
             # Entrant Logic
@@ -74,10 +81,20 @@ class ZoneAnalytics:
                     if state['status'] == 'neutral':
                         state['status'] = 'entrant'
                         self.counts["entrant"] += 1
+                        self.recent_events.append({
+                            "type": "Entrada", 
+                            "gender": CLASS_MAPPING.get(cls_id, "NaoIdentificado"),
+                            "time": datetime.now().strftime("%H:%M:%S")
+                        })
                     elif state['status'] == 'passerby':
                         state['status'] = 'entrant'
                         self.counts["passerby"] -= 1
                         self.counts["entrant"] += 1
+                        self.recent_events.append({
+                            "type": "Entrada", 
+                            "gender": CLASS_MAPPING.get(cls_id, "NaoIdentificado"),
+                            "time": datetime.now().strftime("%H:%M:%S")
+                        })
                 state['last_ent_side'] = curr_ent_side
 
     def get_final_results(self) -> Dict[str, Any]:
@@ -118,5 +135,6 @@ class ZoneAnalytics:
                 "Mulher": final_entrantes["Mulher"] + final_passantes["Mulher"],
                 "NaoIdentificado": final_entrantes["NaoIdentificado"] + final_passantes["NaoIdentificado"],
                 "Total": final_entrantes["Total"] + final_passantes["Total"]
-            }
+            },
+            "recent_events": self.recent_events
         }

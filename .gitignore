@@ -30,3 +30,6 @@ static/output_videos/
 static/uploads/
 static/
 *.xml
+build/
+dist/
+*.spec

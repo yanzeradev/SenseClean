@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, JSON
-from datetime import datetime, timezone
+from datetime import datetime
 from app.database import Base
 
 class Detection(Base):
@@ -11,4 +11,4 @@ class Detection(Base):
     bbox = Column(JSON)
     score = Column(Float)
     track_id = Column(Integer)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(DateTime, default=datetime.now)

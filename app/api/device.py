@@ -121,13 +121,14 @@ async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db),
     repo = DeviceRepository(db)
     
     url_ch1 = f"rtsp://{safe_user}:{safe_pass}@{dev.ip_address}:{dev.port}{path_template.format(ch=1)}"
-    existing_dev = next((d for d in repo.get_all() if d.rtsp_url == url_ch1), None)
+    existing_dev = next((d for d in repo.get_all(user_id=current_user.id) if d.rtsp_url == url_ch1), None)
     
     if not existing_dev:
         new_dev = repo.create(
             ip_address=dev.ip_address, port=dev.port, 
             username=dev.username, password=dev.password, 
-            rtsp_url=url_ch1, manufacturer=manufacturer
+            rtsp_url=url_ch1, manufacturer=manufacturer,
+            user_id=current_user.id
         )
         if is_multi:
             config_update = DeviceUpdate(name=f"Cam {dev.ip_address.split('.')[-1]} - Canal 1")
@@ -158,13 +159,14 @@ async def autodiscover_camera(dev: DeviceConnect, db: Session = Depends(get_db),
         for res in results:
             if res:
                 ch_num, url = res
-                existing_ch = next((d for d in repo.get_all() if d.rtsp_url == url), None)
+                existing_ch = next((d for d in repo.get_all(user_id=current_user.id) if d.rtsp_url == url), None)
                 if not existing_ch:
                     print(f"   ✅ Canal {ch_num} Ativo! Salvando...")
                     dev_ch = repo.create(
                         ip_address=dev.ip_address, port=dev.port, 
                         username=dev.username, password=dev.password, 
-                        rtsp_url=url, manufacturer=manufacturer
+                        rtsp_url=url, manufacturer=manufacturer,
+                        user_id=current_user.id 
                     )
                     config_update = DeviceUpdate(name=f"Cam {dev.ip_address.split('.')[-1]} - Canal {ch_num}")
                     repo.update(dev_ch.id, config_update)
@@ -190,21 +192,26 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
 @router.get("/{device_id}/snapshot")
 def get_snapshot(device_id: int, db: Session = Depends(get_db)):
     """Retorna uma imagem estática (JPEG) da câmera para o Canvas de desenho do Frontend."""
+    
+    from app.services.live_manager import latest_frames
+    if device_id in latest_frames:
+        return Response(content=latest_frames[device_id], media_type="image/jpeg")
+
     repo = DeviceRepository(db)
     dev = repo.get_by_id(device_id)
     if not dev: raise HTTPException(404, "Câmera não encontrada")
     
     stream_name = f"camera_{dev.id}"
-    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
+    rtsp_for_go2rtc = dev.rtsp_url.replace("go2rtc", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
     
     # 1. Garante que a câmera está registrada no motor
     try:
-        requests.put("http://127.0.0.1:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2)
+        requests.put("http://go2rtc:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2)
     except: pass
 
     # 2. Pede um frame instantâneo
     try:
-        res = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=15)
+        res = requests.get(f"http://go2rtc:1984/api/frame.jpeg?src={stream_name}", timeout=15)
         if res.status_code == 200:
             # Devolve a imagem crua, assim a tag <img> do HTML entende nativamente!
             return Response(content=res.content, media_type="image/jpeg")
@@ -224,22 +231,22 @@ async def monitor_stream(device_id: int, db: Session = Depends(get_db)):
     stream_name = f"camera_{dev.id}"
 
     async def frame_generator():
+        from app.services.live_manager import live_frames
+        
         while True:
             # 1. TENTA PEGAR O VÍDEO COM AS CAIXAS VERDES DA IA
-            if device_id in live_manager.monitor_queues:
-                q = live_manager.monitor_queues[device_id]
-                try:
-                    frame_bytes = await asyncio.wait_for(q.get(), timeout=1.0)
-                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    continue
-                except: pass
+            if device_id in live_frames:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + live_frames[device_id] + b'\r\n')
+                # 💥 Damos uma micropausa para transmitir a 10 FPS (salva a CPU do seu navegador)
+                await asyncio.sleep(0.1) 
+                continue
             
             # 2. IA DESLIGADA? TENTA PEGAR O FRAME LIMPO DA CÂMERA (VIA GO2RTC)
             try:
-                res = await asyncio.to_thread(requests.get, f"http://127.0.0.1:1984/api/frame.jpeg?src={stream_name}", timeout=2)
+                res = await asyncio.to_thread(requests.get, f"http://go2rtc:1984/api/frame.jpeg?src={stream_name}", timeout=2)
                 if res.status_code == 200:
                     yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + res.content + b'\r\n')
-                    await asyncio.sleep(1.0) # Puxa 1 frame por segundo para não pesar o dashboard
+                    await asyncio.sleep(1.0) # Puxa 1 frame por segundo quando a IA estiver dormindo
                     continue
             except Exception:
                 pass
@@ -263,10 +270,10 @@ def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):
 
     stream_name = f"camera_{dev.id}"
     
-    # 💥 O SEGREDO: Se for 127.0.0.1, manda o Docker olhar para a máquina host!
-    rtsp_for_go2rtc = dev.rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
+    # 💥 O SEGREDO: Se for go2rtc, manda o Docker olhar para a máquina host!
+    rtsp_for_go2rtc = dev.rtsp_url.replace("go2rtc", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
     
-    go2rtc_api_url = "http://127.0.0.1:1984/api/streams"
+    go2rtc_api_url = "http://go2rtc:1984/api/streams"
     
     payload = {
         "src": rtsp_for_go2rtc,
@@ -279,3 +286,57 @@ def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):
         print(f"⚠️ Erro ao contatar Go2RTC: {e}")
 
     return {"stream_name": stream_name}
+
+@router.get("/{device_id}/heatmap")
+async def get_heatmap(device_id: int, db: Session = Depends(get_db)):
+    """Gera o Mapa de Calor fundindo as coordenadas com o último frame da câmera."""
+    from app.services.live_manager import latest_frames, heatmap_data
+    
+    # Se a câmera caiu, ou se ainda não passaram pessoas suficientes (mínimo 10 passos)
+    if device_id not in latest_frames or device_id not in heatmap_data or len(heatmap_data[device_id]) < 10:
+        raise HTTPException(status_code=404, detail="Aguardando dados suficientes para gerar o mapa térmico.")
+
+    frame_bytes = latest_frames[device_id]
+    points = heatmap_data[device_id]
+
+    # 1. Decodifica a imagem original
+    nparr = np.frombuffer(frame_bytes, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=500, detail="Erro ao ler frame.")
+        
+    h, w = frame.shape[:2]
+
+    # 2. Cria uma "Lona" vazia preta (1 canal) do mesmo tamanho da imagem
+    heat_layer = np.zeros((h, w), dtype=np.float32)
+
+    # 3. Pinga uma gota de calor em cada coordenada que alguém pisou
+    for x, y in points:
+        if 0 <= x < w and 0 <= y < h:
+            heat_layer[y, x] += 1
+
+    # 4. MÁGICA: Espalha o calor como um desfoque gigante (Gaussian Blur)
+    # O Sigma=35 define o raio da "mancha" térmica
+    heat_layer = cv2.GaussianBlur(heat_layer, (0, 0), sigmaX=35, sigmaY=35)
+
+    # 5. Normaliza a intensidade de 0 a 255
+    max_val = np.max(heat_layer)
+    if max_val > 0:
+        heat_layer = (heat_layer / max_val) * 255
+    heat_layer = heat_layer.astype(np.uint8)
+
+    # 6. Aplica o filtro de cores de calor (Azul=Frio, Vermelho=Quente)
+    color_map = cv2.applyColorMap(heat_layer, cv2.COLORMAP_JET)
+
+    # 7. Mescla o mapa de calor com a foto original, mas SÓ onde existe calor!
+    # Isso evita que o fundo inteiro da foto fique azul escuro.
+    mask = heat_layer > 10
+    blended = frame.copy()
+    
+    # 60% Mapa de calor + 40% Foto Original = Transparência Perfeita
+    blended[mask] = cv2.addWeighted(color_map, 0.6, frame, 0.4, 0)[mask]
+
+    # Converte de volta para JPEG e manda para o Frontend
+    _, buffer = cv2.imencode('.jpg', blended, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    
+    return Response(content=buffer.tobytes(), media_type="image/jpeg")

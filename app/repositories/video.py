@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 from app.models.video import Video
+from datetime import date
 
 class VideoRepository:
     """
@@ -52,3 +53,37 @@ class VideoRepository:
     def get_all(self, user_id: int) -> list[Video]:
         """Returns all videos for a specific user."""
         return self.db.query(Video).filter(Video.user_id == user_id).order_by(Video.created_at.desc()).all()
+
+
+    def get_or_create_daily_session(self, device_id: int, user_id: int) -> Video:
+        """
+        Lógica Enterprise: Busca a sessão de hoje para esta câmera. 
+        Se não existir, cria uma nova. Se existir, reaproveita!
+        """
+        today = date.today()
+        
+        session_id = f"daily_cam{device_id}_{today.strftime('%Y%m%d')}"
+        
+        existing_session = self.get_by_id(session_id)
+        
+        if existing_session:
+            existing_session.status = "live_processing"
+            self.db.commit()
+            return existing_session
+            
+        new_session = Video(
+            id=session_id,
+            original_video_path=f"Live Stream Cam {device_id}",
+            status="live_processing",
+            user_id=user_id,
+            reference_date=today,
+            results={
+                "entrantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
+                "passantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
+            }
+        )
+        self.db.add(new_session)
+        self.db.commit()
+        self.db.refresh(new_session)
+        
+        return new_session

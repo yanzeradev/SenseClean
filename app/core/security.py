@@ -1,9 +1,10 @@
+import os  # 💥 ADICIONADO
 import jwt
 from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
 
-# Chave secreta super forte (Em produção, isso deve vir de um arquivo .env)
-SECRET_KEY = "senseclean_super_secret_key_2026_change_me_later"
+
+SECRET_KEY = os.getenv("SECRET_KEY", "chave_insegura_de_fallback")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # Token dura 7 dias
 

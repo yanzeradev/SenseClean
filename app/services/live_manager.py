@@ -9,6 +9,9 @@ import numpy as np
 import traceback
 from datetime import datetime
 from typing import Dict, Any
+from collections import defaultdict, deque
+import supervision as sv
+import math
 
 from app.database import SessionLocal
 from app.repositories.device import DeviceRepository
@@ -17,9 +20,11 @@ from app.vision.analytics import ZoneAnalytics
 from app.vision.interfaces import BaseDetector, BaseTracker
 
 # Filas de memória para transmissão MJPEG ao Frontend
-monitor_queues: Dict[int, asyncio.Queue] = {} 
+live_frames: Dict[int, bytes] = {}
 active_tasks: Dict[int, asyncio.Task] = {}
 stop_signals: Dict[int, asyncio.Event] = {} 
+latest_frames: Dict[int, bytes] = {}
+heatmap_data: Dict[int, list] = {}
 
 async def restart_camera(device_id: int):
     """
@@ -36,7 +41,7 @@ async def restart_camera(device_id: int):
             del active_tasks[device_id]
         
         if device_id in stop_signals: del stop_signals[device_id]
-        if device_id in monitor_queues: del monitor_queues[device_id]
+        if device_id in live_frames: del live_frames[device_id] 
 
 async def get_stream_resolution(rtsp_url: str) -> tuple[int, int]:
     """Descobre a resolução nativa de forma assíncrona para não travar o backend."""
@@ -82,13 +87,13 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
                 if task.done():
                     if dev_id in active_tasks: del active_tasks[dev_id]
                     if dev_id in stop_signals: del stop_signals[dev_id]
-                    if dev_id in monitor_queues: del monitor_queues[dev_id]
+                    if dev_id in live_frames: del live_frames[dev_id]
                     print(f"♻️ Câmera {dev_id} limpa da memória e pronta para reconexão.")
 
             # 2. Verificação de Agendamento no Banco de Dados
             db = SessionLocal()
             device_repo = DeviceRepository(db)
-            devices = [d for d in device_repo.get_all() if d.is_configured]
+            devices = [d for d in device_repo.get_all_system_devices() if d.is_configured]
             
             now = datetime.now()
             current_time_str = now.strftime("%H:%M")
@@ -98,17 +103,22 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
                     continue
                 
                 start, end = dev.processing_start_time, dev.processing_end_time
-                is_time = start <= current_time_str < end
+                
+                if start <= end:
+                    # Turno normal (ex: 08:00 às 18:00)
+                    is_time = start <= current_time_str < end
+                else:
+                    # Turno de madrugada (ex: 18:00 às 08:00)
+                    is_time = current_time_str >= start or current_time_str < end
                 
                 # INICIAR
                 if is_time and dev.id not in active_tasks:
                     print(f"▶️ Iniciando Câmera: {dev.name}")
                     stop_event = asyncio.Event()
                     stop_signals[dev.id] = stop_event
-                    monitor_queues[dev.id] = asyncio.Queue(maxsize=2)
                     
                     task = asyncio.create_task(
-                        run_live_camera_ffmpeg(dev.id, dev.rtsp_url, dev.lines_config, stop_event, detector, tracker)
+                        run_live_camera(dev.id, dev.rtsp_url, dev.lines_config, stop_event, tracker)
                     )
                     active_tasks[dev.id] = task
 
@@ -123,90 +133,166 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
         
         await asyncio.sleep(3)
 
-async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: dict, stop_event: asyncio.Event, detector: BaseDetector, tracker: BaseTracker):
+async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, stop_event: asyncio.Event, tracker: BaseTracker):
     """
-    O Processo isolado que gerencia 1 câmera ao vivo.
+    O Motor inspirado no SenseOpen: Usa OpenCV puro e processa os trackers de forma eficiente.
     """
     db = SessionLocal()
-    video_repo = VideoRepository(db)
+    from app.models.video import Video
+    from app.repositories.device import DeviceRepository
     
-    video_id = f"live_{device_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    process = None
+    dev = DeviceRepository(db).get_by_id(device_id)
+    user_id = dev.user_id if dev else None
     
+    repo_inicial = VideoRepository(db)
+    sessao_diaria = repo_inicial.get_or_create_daily_session(device_id, user_id)
+    video_id = sessao_diaria.id
+    
+    bagagem_resultados = sessao_diaria.results or {
+        "entrantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
+        "passantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
+        "total_geral": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
+    }
+    bagagem_entrantes = bagagem_resultados.get("entrantes", {}).get("Total", 0)
+    bagagem_passantes = bagagem_resultados.get("passantes", {}).get("Total", 0)
+
     try:
-        # 1. TRADUÇÃO E REGISTRO NO GO2RTC
+        # 1. TRADUÇÃO GO2RTC
         stream_name = f"camera_{device_id}"
-        go2rtc_api = "http://127.0.0.1:1984/api/streams"
-        
-        # Traduz 127.0.0.1 para host.docker.internal para o go2rtc (Docker) conseguir ver o SIM Next
-        rtsp_for_go2rtc = rtsp_url.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal") + "#tcp"
-        
-        # Nossa URL de consumo será o go2rtc local
-        local_rtsp = f"rtsp://127.0.0.1:8554/{stream_name}"
+        rtsp_for_go2rtc = rtsp_url.replace("go2rtc", "host.docker.internal").replace("localhost", "host.docker.internal")
+        local_rtsp = f"rtsp://go2rtc:8554/{stream_name}"
         
         try:
-            requests.put(go2rtc_api, params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=3)
+            requests.put("http://go2rtc:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=3)
         except Exception: 
-            print(f"⚠️ go2rtc não respondeu para {stream_name}. Usando link direto.")
             local_rtsp = rtsp_url
 
-        # 2. RESOLUÇÃO (Aumentamos o tempo para 8s para o SIM Next responder)
-        WIDTH, HEIGHT = await get_stream_resolution(local_rtsp)
-        if WIDTH == 0 or HEIGHT == 0: WIDTH, HEIGHT = 1280, 720
+        print(f"🔌 Ingestão OpenCV: {local_rtsp}")
+
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000|max_delay;5000000"
         
-        FRAME_SIZE = WIDTH * HEIGHT * 3 
-        print(f"🔌 Ingestão FFMPEG: {local_rtsp} ({WIDTH}x{HEIGHT})")
+        cap = cv2.VideoCapture(local_rtsp, cv2.CAP_FFMPEG)
+        
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
 
-        # 3. COMANDO FFMPEG (TCP forçado e 5 FPS para não fritar o PC)
-        command = [
-            'ffmpeg', 
-            '-rtsp_transport', 'tcp', 
-            '-i', local_rtsp, 
-            '-f', 'rawvideo', 
-            '-pix_fmt', 'bgr24', 
-            '-r', '5', 
-            '-an', '-sn', '-y', '-'
-        ]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
-
-        # --- A MÁGICA DA ARQUITETURA LIMPA ---
-        # Instanciamos o nosso Motor Matemático da Fase 1, injetando as linhas do banco
         entrant_line = lines_config.get('entrant', [])
         passerby_line = lines_config.get('passerby', [])
         in_side = lines_config.get('in_side', 'right')
-        
         analytics = ZoneAnalytics(entrant_line, passerby_line, in_side)
+        analytics.counts["entrant"] = bagagem_entrantes
+        analytics.counts["passerby"] = bagagem_passantes
         
-        t0 = time.time()
         last_save = time.time()
+        last_snap = 0
+        frame_count = 0
+        last_tracks = []
         
+        box_annotator = sv.BoxAnnotator(thickness=2)
+        
+        label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
+        track_history = defaultdict(lambda: deque(maxlen=150))
+        
+        trace_annotator = sv.TraceAnnotator(
+            thickness=2,
+            trace_length=60, # Comprimento do rastro
+            position=sv.Position.CENTER # 💥 Mira no centro (cintura)
+        )
+
         while not stop_event.is_set():
-            try:
-                # Leitura síncrona do Pipe FFMPEG isolada numa Thread
-                raw_frame = await asyncio.to_thread(process.stdout.read, FRAME_SIZE)
-            except ValueError:
+            # Leitura assíncrona do OpenCV
+            ret, frame = await asyncio.to_thread(cap.read)
+            
+            if not ret:
+                print(f"⚠️ Perda de sinal na câmera {device_id}. Reconectando...")
+                await asyncio.sleep(5)
                 break 
             
-            if len(raw_frame) != FRAME_SIZE:
-                await asyncio.sleep(0.5)
-                continue
+            frame_count += 1
 
-            frame = np.frombuffer(raw_frame, np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
-
-            # --- PROCESSAMENTO IA OFF-LOADED ---
-            detections = await asyncio.to_thread(detector.detect, frame)
-            tracks = await asyncio.to_thread(tracker.update, detections, frame)
+            # Snapshot Cache (Sem travar a CPU)
+            if time.time() - last_snap > 1.0:
+                ret_clean, buffer_clean = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                if ret_clean: latest_frames[device_id] = buffer_clean.tobytes()
+                last_snap = time.time()
+            qtd_cameras = max(1, len(active_tasks))
             
-            # --- ATUALIZAÇÃO DA LÓGICA DE NEGÓCIO ---
-            analytics.update(tracks)
+            marcha_ia = qtd_cameras * 3
 
-            # --- DESENHO EM TELA (Visuals) ---
-            for track in tracks:
-                x1, y1, x2, y2 = map(int, track["bbox"])
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID: {track['track_id']}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            # Desenha as linhas físicas
+            if frame_count % marcha_ia == 0:
+                tracks = await asyncio.to_thread(tracker.update, None, frame)
+                last_tracks = tracks
+                analytics.update(tracks)
+
+                if lines_config.get("modules", {}).get("heatmap", False):
+                    if device_id not in heatmap_data:
+                        heatmap_data[device_id] = []
+                    
+                    for t in tracks:
+                        cx = int((t["bbox"][0] + t["bbox"][2]) / 2)
+                        cy = int((t["bbox"][1] + t["bbox"][3]) / 2) 
+                        heatmap_data[device_id].append((cx, cy))
+                    
+                    # Limita a memória a 10.000 pontos para a RAM do seu servidor Oracle não explodir
+                    if len(heatmap_data[device_id]) > 10000:
+                        heatmap_data[device_id] = heatmap_data[device_id][-10000:]
+            else:
+                tracks = last_tracks
+
+            if len(tracks) > 0:
+                print(f"👀 CAM {device_id} Vendo {len(tracks)} pessoa(s) | Bounding Box do ID {tracks[0]['track_id']}: {tracks[0]['bbox']}")
+
+            # --- DESENHO EM TELA ---
+            if len(tracks) > 0:
+                xyxy = np.array([t["bbox"] for t in tracks])
+                tracker_id = np.array([t["track_id"] for t in tracks])
+                class_id = np.array([t["class_id"] for t in tracks])
+                
+                detections = sv.Detections(
+                    xyxy=xyxy,
+                    tracker_id=tracker_id,
+                    class_id=class_id
+                )
+
+                # 💥 1. RASTRO ESTILO "COMETA FLUIDO" (Costurando os frames)
+                if lines_config.get("modules", {}).get("trails", False):
+                    current_ids = [t["track_id"] for t in tracks]
+                    for tid in list(track_history.keys()):
+                        if tid not in current_ids:
+                            del track_history[tid]
+
+                    for track in tracks:
+                        tid = track['track_id']
+                        # Centro da cintura
+                        cx = int((track["bbox"][0] + track["bbox"][2]) / 2)
+                        cy = int((track["bbox"][1] + track["bbox"][3]) / 2)
+                        
+                        # Guarda a posição (Pode tirar o math.sqrt, queremos todos os frames válidos)
+                        track_history[tid].append((cx, cy))
+                        
+                        history = list(track_history[tid])
+                        history_len = len(history)
+                        
+                        # MÁGICA VISUAL: Preenchendo os buracos
+                        if history_len > 1:
+                            for i in range(1, history_len):
+                                pt1 = history[i - 1]
+                                pt2 = history[i]
+                                
+                                # A espessura cresce suavemente (da ponta mais fina até 10px no corpo da pessoa)
+                                thickness = int(10 * (i / history_len)) + 1
+                                
+                                # 1. Desenha a linha ligando um ponto ao outro (isso tapa o buraco do FPS)
+                                cv2.line(frame, pt1, pt2, (255, 0, 255), thickness, cv2.LINE_AA)
+                                
+                                # 2. Desenha a bolha arredondada nas emendas para o traço ficar macio
+                                cv2.circle(frame, pt2, thickness // 2, (255, 0, 255), -1, cv2.LINE_AA)
+
+                # 2. Desenha a Caixa Supervision por cima das bolhas
+                frame = box_annotator.annotate(scene=frame, detections=detections)
+                labels = [f"ID: {t_id}" for t_id in tracker_id]
+                frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
+
+            # Mantemos o nosso código nativo para as Linhas de Contagem e Contadores (Verde/Amarelo)
             if len(entrant_line) > 1:
                 pts = np.array([ [p['x'], p['y']] for p in entrant_line ], np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [pts], False, (0, 255, 0), 3)
@@ -215,48 +301,61 @@ async def run_live_camera_ffmpeg(device_id: int, rtsp_url: str, lines_config: di
                 pts = np.array([ [p['x'], p['y']] for p in passerby_line ], np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [pts], False, (0, 255, 255), 3)
 
-            # Placar Live
             cv2.rectangle(frame, (10, 10), (250, 100), (0, 0, 0), -1)
             cv2.putText(frame, f"Entrantes: {analytics.counts['entrant']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             cv2.putText(frame, f"Passantes: {analytics.counts['passerby']}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            # --- STREAMING PARA O REACT ---
-            if device_id in monitor_queues:
-                q = monitor_queues[device_id]
-                if q.full():
-                    try: q.get_nowait()
-                    except: pass
-                
-                ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
-                if ret: await q.put(buffer.tobytes())
+            # --- STREAM MJPEG PARA DASHBOARD ---
+            ret_live, buffer_live = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            if ret_live: 
+                live_frames[device_id] = buffer_live.tobytes()
 
-            # --- SALVAMENTO NO BANCO (A CADA 2 SEGUNDOS) ---
+            # --- SALVAMENTO NO BANCO ---
             if time.time() - last_save > 2:
                 try:
-                    # Capturamos o JSON limpo através da função interna do ZoneAnalytics
-                    current_results = analytics.get_final_results()
+                    atuais = analytics.get_final_results()
+                    
+                    old_events = bagagem_resultados.get("recent_events", [])
+                    new_events = atuais.get("recent_events", [])
+                    
+                    # Apenas junta as listas e pega os 100 últimos. 
+                    # Isso evita o bug de deletar quem passa no mesmo exato segundo!
+                    combined_events = sorted(old_events + new_events, key=lambda x: x["time"], reverse=True)[:100]
+
+                    # Usa sempre um dicionário padrão como base para evitar chaves faltantes (KeyError)
+                    base_keys = {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
+
+                    merged_results = {
+                        "entrantes": {k: atuais["entrantes"].get(k, 0) + bagagem_resultados.get("entrantes", base_keys).get(k, 0) for k in base_keys},
+                        "passantes": {k: atuais["passantes"].get(k, 0) + bagagem_resultados.get("passantes", base_keys).get(k, 0) for k in base_keys},
+                        "total_geral": {k: atuais.get("total_geral", base_keys).get(k, 0) + bagagem_resultados.get("total_geral", base_keys).get(k, 0) for k in base_keys},
+                        "recent_events": combined_events
+                    }
+                    
                     with SessionLocal() as db_save:
                         repo_save = VideoRepository(db_save)
                         repo_save.update_status(video_id, "live_processing")
-                        
                         vid = repo_save.get_by_id(video_id)
-                        vid.results = current_results
-                        db_save.commit()
+                        if vid:
+                            vid.results = merged_results # 💥 Salva a soma total!
+                            db_save.commit()
                 except Exception as e:
                     print(f"Erro ao salvar estatísticas: {e}")
                 last_save = time.time()
             
-            await asyncio.sleep(0.001) # Yield to event loop
+            await asyncio.sleep(0.001)
 
     except Exception as e:
         print(f"❌ Erro fatal Câmera {device_id}: {traceback.format_exc()}")
     finally:
-        if process: process.terminate()
+        if 'cap' in locals(): cap.release()
         db.close()
-        if device_id in monitor_queues: del monitor_queues[device_id]
+        if device_id in live_frames: del live_frames[device_id]
+        if device_id in latest_frames: del latest_frames[device_id]
+        if device_id in heatmap_data: del heatmap_data[device_id]
         
         try:
             with SessionLocal() as db_final:
                 VideoRepository(db_final).update_status(video_id, "done")
         except: pass
-        print(f"✅ Câmera {device_id} Desconectada.")
+        print(f"✅ Câmera {device_id} Encerrada.")

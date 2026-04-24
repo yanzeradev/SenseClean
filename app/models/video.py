@@ -1,7 +1,8 @@
 from sqlalchemy import Column, String, DateTime, JSON, Integer
-from datetime import datetime, timezone
+from datetime import datetime
 from app.database import Base
 import uuid
+from sqlalchemy import Date
 
 class Video(Base):
     """
@@ -17,12 +18,12 @@ class Video(Base):
     processed_video_path = Column(String, nullable=True)
     
     user_id = Column(Integer, index=True, nullable=True)
+    
+    reference_date = Column(Date, nullable=True, index=True)
 
-    # Status tracks the lifecycle: pending, processing, completed, failed
     status = Column(String, default="pending", index=True)
     
-    # Store the final analytics results directly as JSON
     results = Column(JSON, nullable=True)
     
     # Automatically track when the record was created
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.now)
