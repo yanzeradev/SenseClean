@@ -186,9 +186,25 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         last_snap = 0
         frame_count = 0
         last_tracks = []
+        last_heatmap_save = time.time() 
         
-        box_annotator = sv.BoxAnnotator(thickness=2)
-        label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
+        # Mapeia as classes: 0(Homem)=Azul, 1(Mulher)=Rosa, 2(Desconhecido)=Cinza
+        custom_palette = sv.ColorPalette.from_hex(["#3b82f6", "#ec4899", "#94a3b8"])
+        
+        # Caixa com cantos arredondados (Design moderno)
+        box_annotator = sv.RoundBoxAnnotator(
+            thickness=2,
+            color=custom_palette
+        )
+        
+        # Etiqueta mais grossa e legível
+        label_annotator = sv.LabelAnnotator(
+            text_scale=0.5,
+            text_thickness=2,
+            text_padding=8,
+            color=custom_palette,
+            text_color=sv.Color.from_hex("#ffffff")
+        )
         
         # Lógica Opcional do PolygonZone
         polygon_points = lines_config.get('polygon', [])
@@ -377,6 +393,52 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 except Exception as e:
                     print(f"Erro ao salvar estatísticas: {e}")
                 last_save = time.time()
+
+            # --- 💥 2. SALVAMENTO DO MAPA DE CALOR HISTÓRICO ---
+            # Para testes rápidos, coloquei 60 segundos. Depois você pode mudar para 3600 (1 hora)
+            if lines_config.get("modules", {}).get("heatmap", False):
+                if time.time() - last_heatmap_save > 60:
+                    if device_id in latest_frames and len(heatmap_data.get(device_id, [])) > 10:
+                        try:
+                            # Lê o frame limpo da memória
+                            frame_bytes = latest_frames[device_id]
+                            nparr = np.frombuffer(frame_bytes, np.uint8)
+                            bg_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                            h, w = bg_frame.shape[:2]
+                            
+                            # Gera a lona de calor
+                            heat_layer = np.zeros((h, w), dtype=np.float32)
+                            for x, y in heatmap_data[device_id]:
+                                if 0 <= x < w and 0 <= y < h:
+                                    heat_layer[y, x] += 1
+                                    
+                            # Desfoca e aplica cor
+                            heat_layer = cv2.GaussianBlur(heat_layer, (0, 0), sigmaX=35, sigmaY=35)
+                            max_val = np.max(heat_layer)
+                            if max_val > 0:
+                                heat_layer = (heat_layer / max_val) * 255
+                                
+                            color_map = cv2.applyColorMap(heat_layer.astype(np.uint8), cv2.COLORMAP_JET)
+                            mask = heat_layer > 10
+                            
+                            # Mescla a imagem
+                            blended = bg_frame.copy()
+                            blended[mask] = cv2.addWeighted(color_map, 0.6, bg_frame, 0.4, 0)[mask]
+                            
+                            # Salva a imagem no servidor
+                            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            report_filename = f"static/reports/heatmap_cam{device_id}_{timestamp_str}.jpg"
+                            cv2.imwrite(report_filename, blended)
+                            print(f"🔥 Time-lapse Térmico salvo: {report_filename}")
+                            
+                            # Opcional: Descomente a linha abaixo se quiser que o mapa de calor "zere" a cada foto
+                            # heatmap_data[device_id].clear()
+                            
+                        except Exception as e:
+                            print(f"Erro ao salvar mapa de calor histórico: {e}")
+                            
+                    last_heatmap_save = time.time()
+                    
             
             await asyncio.sleep(0.001)
 
