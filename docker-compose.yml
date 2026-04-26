@@ -27,18 +27,22 @@ services:
       - "8000:8000"
     deploy:
       resources:
-        limits:
-          cpus: '3.4'
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=sqlite:///./static/sensevision.db 
       - SECRET_KEY=${JWT_SECRET_KEY}
       - REGISTRATION_INVITE_CODE=${REGISTRATION_INVITE_CODE}
       - TZ=America/Sao_Paulo
       - OMP_NUM_THREADS=4
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     extra_hosts:                               
       - "host.docker.internal:host-gateway"     
     depends_on:
-      - db
       - go2rtc
     restart: unless-stopped
     volumes:

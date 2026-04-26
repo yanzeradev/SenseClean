@@ -27,7 +27,18 @@ dependencies = [
     "supervision (>=0.27.0.post2,<0.28.0)",
 ]
 
-
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+# 1. Declaramos a fonte externa do PyTorch com suporte a CUDA
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
+
+# 2. Informamos ao Poetry para buscar essas três bibliotecas EXCLUSIVAMENTE na fonte "pytorch"
+[tool.poetry.dependencies]
+torch = {version = ">=2.0.0", source = "pytorch"}
+torchvision = {version = "*", source = "pytorch"}
+torchaudio = {version = "*", source = "pytorch"}

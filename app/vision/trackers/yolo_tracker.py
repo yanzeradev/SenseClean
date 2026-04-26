@@ -22,8 +22,8 @@ class YoloTracker(BaseTracker):
             conf=0.45,   
             iou=0.5,    
             verbose=False,
-            device="cpu", 
-            half=False     
+            device="0", 
+            half=True,     
         )
         
         tracked_objects = []
