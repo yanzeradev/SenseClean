@@ -200,7 +200,7 @@ export function Dashboard() {
                 </Button>
               </div>
               <div className="aspect-video w-full bg-gray-900 flex items-center justify-center">
-                <img src={viewingStream} alt="Live AI Stream" className="w-full h-full object-contain" />
+                <img src={viewingStream} alt="Live AI Stream" className="w-full h-full object-fill" />
               </div>
             </div>
           </div>
@@ -224,7 +224,7 @@ export function Dashboard() {
                 <img 
                   src={`/api/devices/${viewingHeatmap}/heatmap?t=${Date.now()}`} 
                   alt="Heatmap" 
-                  className="absolute inset-0 w-full h-full object-contain z-10"
+                  className="absolute inset-0 w-full h-full object-fill z-10"
                   onError={(e) => {
                     // Esconde a imagem quebrada
                     (e.target as HTMLImageElement).style.display = 'none';
