@@ -1,29 +1,24 @@
-# Usa uma versão leve do Python 3.11
 FROM python:3.11-slim
 
-# Instala as dependências do sistema
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    libsm6 \
-    libxext6 \
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y \
+    ffmpeg libsm6 libxext6 \
     && rm -rf /var/lib/apt/lists/*
-
+    
 WORKDIR /app
 
-# Copia apenas o requirements primeiro para aproveitar o cache do Docker
-COPY requirements.txt .
+# Habilita mounts de cache (precisa do BuildKit)
+RUN pip install poetry
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+COPY pyproject.toml poetry.lock* ./
 
-# Instala as dependências do Python usando o cache do BuildKit para o PIP
+# Poetry install com cache mounts
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip wheel -r requirements.txt
+    --mount=type=cache,target=/root/.cache/poetry \
+    poetry config virtualenvs.create false \
+    && poetry install --no-root --no-interaction --no-ansi
 
-# Copia o restante do código
 COPY . .
 
 EXPOSE 8000
-
-# Comando para iniciar o servidor
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
