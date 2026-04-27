@@ -108,6 +108,7 @@ async def process_video_background(video_id: str, video_path: str, request_data:
             
             cv2.rectangle(frame, (10, 10), (250, 100), (0, 0, 0), -1)
             cv2.putText(frame, f"Entrantes: {analytics.counts['entrant']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.putText(frame, f"Passantes: {analytics.counts['passerby']}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             out.write(frame)
             success, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60]) # Reduza a qualidade pra 60 pra ficar mais leve!
