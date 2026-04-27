@@ -20,6 +20,8 @@ from app.repositories.device import DeviceRepository
 from app.repositories.video import VideoRepository
 from app.vision.analytics import ZoneAnalytics
 from app.vision.interfaces import BaseDetector, BaseTracker
+from app.vision.trackers.yolo_tracker import YoloTracker
+from app.core.config import MODEL_PATH
 
 # Filas de memória para transmissão MJPEG ao Frontend
 live_frames: Dict[int, bytes] = {}
@@ -76,7 +78,7 @@ async def get_stream_resolution(rtsp_url: str) -> tuple[int, int]:
         
     return 1280, 720 # Fallback HD (mais leve que Full HD para evitar novos travamentos)
 
-async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
+async def scheduler_loop(detector: BaseDetector):
     """
     O Coração do Self-Healing. Roda a cada 3 segundos verificando quem deve estar ligado.
     """
@@ -120,7 +122,7 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
                     stop_signals[dev.id] = stop_event
                     
                     task = asyncio.create_task(
-                        run_live_camera(dev.id, dev.rtsp_url, dev.lines_config, stop_event, tracker)
+                        run_live_camera(dev.id, dev.rtsp_url, dev.lines_config, stop_event)
                     )
                     active_tasks[dev.id] = task
 
@@ -152,6 +154,7 @@ def _camera_reader_worker(rtsp_url: str, cam_data: dict, stop_event: asyncio.Eve
                 time.sleep(2) # Espera 2s antes de tentar de novo
                 continue
                 
+        # CORREÇÃO: Voltamos ao cap.read() para evitar o Memory Leak do FFmpeg com HEVC
         ret, frame = cap.read()
         
         # Se a rede oscilar e falhar o frame
@@ -162,7 +165,7 @@ def _camera_reader_worker(rtsp_url: str, cam_data: dict, stop_event: asyncio.Eve
             time.sleep(1)
             continue
 
-        # MÁGICA: Substitui a foto instantaneamente na memória RAM
+        # Substitui a foto instantaneamente na memória RAM
         cam_data["frame"] = frame
         cam_data["online"] = True
         
@@ -170,10 +173,13 @@ def _camera_reader_worker(rtsp_url: str, cam_data: dict, stop_event: asyncio.Eve
         cap.release()
 
 
-async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, stop_event: asyncio.Event, tracker: BaseTracker):
+async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, stop_event: asyncio.Event):
     """
     O Motor inspirado no SenseOpen: Usa OpenCV puro e processa os trackers de forma eficiente.
     """
+    # Instancia um cérebro de rastreamento isolado exclusivo para esta câmera
+    tracker = YoloTracker(model_path=str(MODEL_PATH))
+    
     db = SessionLocal()
     from app.models.video import Video
     from app.repositories.device import DeviceRepository

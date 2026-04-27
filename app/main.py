@@ -24,12 +24,11 @@ Base.metadata.create_all(bind=engine)
 async def lifespan(app: FastAPI):
     print("🚀 Iniciando Motor de IA e Scheduler...")
     try:
-        # Instancia os modelos IA globais uma única vez
+        # Instancia apenas o detector de forma global
         detector = YoloDetector(model_path=str(MODEL_PATH))
-        tracker = YoloTracker(model_path=str(MODEL_PATH))
         
         # Dispara a tarefa do Scheduler de câmeras ao vivo em background
-        asyncio.create_task(live_manager.scheduler_loop(detector, tracker))
+        asyncio.create_task(live_manager.scheduler_loop(detector))
     except Exception as e:
         print(f"❌ Erro ao iniciar IA: {e}")
     

@@ -39,8 +39,9 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
         if (!cvs || !img || isLoading) return;
 
         const render = () => {
-            cvs.width = img.naturalWidth || img.width;
-            cvs.height = img.naturalHeight || img.height;
+            // MÁGICA: Mapeamento 1:1 com o tamanho que está visível na tela
+            cvs.width = cvs.clientWidth;
+            cvs.height = cvs.clientHeight;
             const ctx = cvs.getContext('2d');
             if (!ctx) return;
             ctx.clearRect(0, 0, cvs.width, cvs.height);
@@ -70,9 +71,9 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
         const cvs = canvasRef.current;
         if(!cvs) return;
         const rect = cvs.getBoundingClientRect();
-        const scaleX = cvs.width / rect.width;
-        const scaleY = cvs.height / rect.height;
-        const pt = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+        
+        // Removemos o scaleX e scaleY. O mouse bate perfeitamente com a ponta do pincel agora!
+        const pt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
         
         if (activeLine === 'entrant') setEntrantPoints([...entrantPoints, pt]);
         else if (activeLine === 'passerby') setPasserbyPoints([...passerbyPoints, pt]);
@@ -316,9 +317,6 @@ export function DeviceList() {
             <div className="bg-gray-950 p-2 flex gap-2 border-t border-gray-800">
               <Button variant="secondary" className="flex-1 gap-2 bg-blue-900/30 text-blue-400 hover:bg-blue-900/50" onClick={() => handleViewStream(dev)}>
                 <Eye className="w-4 h-4" /> Ao Vivo
-              </Button>
-              <Button variant="secondary" className="flex-1 gap-2" onClick={() => handleOpenConfig(dev)}>
-                <Settings className="w-4 h-4" /> Configurar
               </Button>
               <Button variant="secondary" className="flex-1 gap-2" onClick={() => handleOpenConfig(dev)}>
                 <Settings className="w-4 h-4" /> Configurar

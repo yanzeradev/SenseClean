@@ -12,7 +12,11 @@ stop:
 
 build:
 	@echo "Reconstruindo e ligando o SenseClean..."
-	docker compose build
+	docker compose up -d --build
+
+build-front:
+	@echo "Reconstruindo apenas o Frontend..."
+	docker compose build frontend
 
 logs:
 	@echo "Lendo logs do sistema (Pressione Ctrl+C para sair)..."
@@ -29,11 +33,9 @@ dev-front:
 	@echo "Iniciando Frontend em Modo Dev..."
 	cd frontend && npm run dev
 
-run-dev:
-	@echo "Iniciando o SenseClean em Modo Dev..."
-	docker compose up -d db go2rtc
-	poetry run uvicorn app.main:app --reload &
-	cd frontend && npm run dev
+restart:
+	@echo "Reiniciando o SenseClean..."
+	docker compose restart
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
