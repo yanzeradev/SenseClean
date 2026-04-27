@@ -5,7 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Paths Estáticos
 #MODEL_PATH = BASE_DIR / "model_gender.pt"
-MODEL_PATH = "model_gender.engine"
+MODEL_PATH = "model_gender.pt"
 
 # Outras configurações que não mudam...
 MAX_VIDEO_SIZE_MB = 50
