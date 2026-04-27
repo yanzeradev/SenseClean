@@ -2,18 +2,13 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Define o SQLite como padrão se a variável de ambiente não existir
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "sqlite:///./sensevision.db"
+    "postgresql+psycopg://sense_user:sense_password@localhost:5433/sensevision"
 )
 
-# O SQLite exige essa flag para não bloquear threads concorrentes no FastAPI
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-else:
-    engine = create_engine(DATABASE_URL)
-
+# Removemos o connect_args={"check_same_thread": False}, pois o Postgres não precisa disso
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

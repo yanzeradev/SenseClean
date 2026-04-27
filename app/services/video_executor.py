@@ -63,7 +63,11 @@ async def process_video_background(video_id: str, video_path: str, request_data:
     try:
         job["ready_event"].set()
         
-        async for frame, tracks in pipeline.process():
+        async for frame, tracking_result in pipeline.process():
+            
+            # 💥 CORREÇÃO: Extrai a lista de pessoas do novo dicionário do Tracker
+            tracks = tracking_result.get("analytics_data", [])
+            
             analytics.update(tracks)
             
             def draw_polyline(img, points, color):
