@@ -9,19 +9,17 @@ class ReportService:
     
     @staticmethod
     def generate_excel(video_id: str, results: Dict[str, Any]) -> str:
-        """
-        Transforms the final JSON results into a pandas DataFrame and exports it to Excel.
-        Returns the path to the saved file.
-        """
         os.makedirs("static/reports", exist_ok=True)
         report_path = f"static/reports/{video_id}_report.xlsx"
         
-        # Convert the nested dictionary into a pandas DataFrame
-        # .T transposes it so rows are (entrantes, passantes, total) and columns are genders
-        df = pd.DataFrame(results).T
+        dados_planilha = {
+            "entrantes": results.get("entrantes", {}),
+            "passantes": results.get("passantes", {}),
+            "total_geral": results.get("total_geral", {})
+        }
         
-        # Save to disk
+        # Converte o dicionário purificado em um DataFrame pandas e exporta
+        df = pd.DataFrame(dados_planilha).T
         df.to_excel(report_path)
         
-        # Return the public URL path
         return f"/static/reports/{video_id}_report.xlsx"

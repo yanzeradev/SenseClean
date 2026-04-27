@@ -25,6 +25,7 @@ dependencies = [
     "alembic (>=1.18.4,<2.0.0)",
     "psycopg[binary] (>=3.3.3,<4.0.0)",
     "supervision (>=0.27.0.post2,<0.28.0)",
+    "tensorrt (>=10.16.1.11,<11.0.0.0)",
 ]
 
 [build-system]

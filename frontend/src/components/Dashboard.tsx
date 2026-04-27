@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { Camera, Video, RefreshCw, Activity, Users, ArrowRightToLine, ArrowLeftFromLine, ArrowLeft, Eye, X, Map as MapIcon } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from "@/lib/api";
@@ -57,6 +58,7 @@ export function Dashboard() {
   });
 
   const liveSessions = Array.from(uniqueLiveSessionsMap.values());
+  const uploadedVideos = videos.filter(v => !v.id.startsWith('daily_'));
 
   if (loading && videos.length === 0) {
     return (
@@ -317,10 +319,62 @@ export function Dashboard() {
         </TabsContent>
         
         <TabsContent value="videos">
-          <div className="text-center py-12 border border-dashed border-gray-800 rounded-xl bg-gray-900/30">
-            <Video className="w-12 h-12 text-gray-700 mx-auto mb-4" />
-            <p className="text-gray-400">Área de Uploads off-line.</p>
-          </div>
+          {uploadedVideos.length === 0 ? (
+            <div className="text-center py-12 border border-dashed border-gray-800 rounded-xl bg-gray-900/30">
+              <Video className="w-12 h-12 text-gray-700 mx-auto mb-4" />
+              <p className="text-gray-400">Nenhum vídeo processado ainda.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {uploadedVideos.map((video) => (
+                <Card key={video.id} className="bg-gray-900/80 border-gray-800 flex flex-col">
+                  <div className="relative aspect-video bg-black flex items-center justify-center border-b border-gray-800">
+                    {/* Se o vídeo estiver processado, mostra o primeiro frame do vídeo gerado */}
+                    {video.status === 'completed' && video.processed_video_path ? (
+                      <video 
+                        src={`/api${video.processed_video_path}`} 
+                        className="w-full h-full object-contain opacity-80"
+                        controls
+                      />
+                    ) : (
+                      <Video className="w-12 h-12 text-gray-700" />
+                    )}
+                    
+                    {/* Badge de Status */}
+                    <div className="absolute top-2 right-2">
+                      {video.status === 'completed' && <Badge className="bg-green-600">Concluído</Badge>}
+                      {video.status === 'processing' && <Badge className="bg-blue-600 animate-pulse">Processando</Badge>}
+                      {video.status === 'failed' && <Badge variant="destructive">Falha</Badge>}
+                    </div>
+                  </div>
+                  
+                  <CardContent className="p-4 flex-1 flex flex-col">
+                    <h3 className="font-bold text-white mb-2 truncate">Vídeo: {video.id.substring(0, 8)}...</h3>
+                    <p className="text-sm text-gray-400 mb-4">
+                      Enviado em: {new Date(video.created_at).toLocaleDateString()}
+                    </p>
+                    
+                    {/* Se estiver concluído, mostra resumo e botão de download */}
+                    {video.status === 'completed' && video.results && (
+                      <div className="mt-auto space-y-3">
+                        <div className="flex justify-between text-sm bg-gray-950 p-2 rounded border border-gray-800">
+                          <span className="text-green-400">Entraram: {video.results.entrantes?.Total || 0}</span>
+                          <span className="text-yellow-400">Saíram: {video.results.passantes?.Total || 0}</span>
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          className="w-full bg-blue-900/20 text-blue-400 border-blue-900/50 hover:bg-blue-900/40"
+                          onClick={() => window.open(`/api/static/reports/${video.id}_report.xlsx`, '_blank')}
+                        >
+                          Baixar Relatório (Excel)
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

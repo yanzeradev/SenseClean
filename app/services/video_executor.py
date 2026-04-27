@@ -12,6 +12,7 @@ from app.core.config import MODEL_PATH
 from app.schemas.video import ProcessVideoRequest
 from app.services.report_service import ReportService
 import os
+import time
 
 async def process_video_background(video_id: str, video_path: str, request_data: ProcessVideoRequest):
     db = SessionLocal()
@@ -30,9 +31,10 @@ async def process_video_background(video_id: str, video_path: str, request_data:
     cap.release()
 
     # --- Video Writer Setup (Saving the processed video) ---
+    # --- Video Writer Setup (Saving the processed video) ---
     os.makedirs("static/output_videos", exist_ok=True)
-    out_video_path = f"static/output_videos/{video_id}.webm"
-    fourcc = cv2.VideoWriter_fourcc(*'VP80') # Codec Nativo do Google para Web
+    out_video_path = f"static/output_videos/{video_id}.mp4" # 💥 Mudamos para MP4
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') # 💥 Codec MP4V (MUITO mais rápido na CPU)
     out = cv2.VideoWriter(out_video_path, fourcc, fps, (true_width, true_height))
     
     # 💥 SCALE CALCULATION (Fixing the Resolution Mismatch)
@@ -62,6 +64,8 @@ async def process_video_background(video_id: str, video_path: str, request_data:
 
     try:
         job["ready_event"].set()
+        start_time = time.time() # 💥 Inicia o cronômetro do processamento
+        frames_processados = 0
         
         async for frame, tracking_result in pipeline.process():
             
@@ -89,17 +93,16 @@ async def process_video_background(video_id: str, video_path: str, request_data:
             cv2.putText(frame, f"Entrants: {analytics.counts['entrant']}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
             cv2.putText(frame, f"Passerby: {analytics.counts['passerby']}", (30, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
-            # 💥 NEW: Write the annotated frame to disk!
             out.write(frame)
-
-            # Encode frame to JPEG for live streaming
-            success, buffer = cv2.imencode('.jpg', frame)
+            success, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60]) # Reduza a qualidade pra 60 pra ficar mais leve!
             if success:
                 await job["queue"].put(buffer.tobytes())
             
-            current_frame += 1
-            if total_frames > 0 and current_frame % 5 == 0:
-                task_manager.update_progress(video_id, (current_frame / total_frames) * 100)
+            # 💥 Cálculo de FPS em tempo real a cada 30 frames
+            frames_processados += 1
+            if frames_processados % 30 == 0:
+                fps_atual = frames_processados / (time.time() - start_time)
+                print(f"🚀 VELOCIDADE DA IA: {fps_atual:.2f} FPS")
 
             await asyncio.sleep(0.001)
 

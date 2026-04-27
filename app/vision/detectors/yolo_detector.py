@@ -9,7 +9,7 @@ class YoloDetector(BaseDetector):
     """
     
     def __init__(self, model_path: str, device: str = "cpu", conf_threshold: float = 0.4, imgsz: int = 640):
-        self.model = YOLO(model_path).to(device)
+        self.model = YOLO(model_path, task='detect')
         self.conf_threshold = conf_threshold
         self.imgsz = imgsz
         

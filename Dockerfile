@@ -1,7 +1,7 @@
 # Usa uma versão leve do Python 3.11
 FROM python:3.11-slim
 
-# Instala as dependências do sistema necessárias para o OpenCV e leitura de vídeos (FFmpeg)
+# Instala as dependências do sistema
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
@@ -10,20 +10,17 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Instala o gerenciador de pacotes Poetry
-RUN pip install poetry
+# Copia apenas o requirements primeiro para aproveitar o cache do Docker
+COPY requirements.txt .
 
-# Copia os arquivos de dependência primeiro (para aproveitar o cache do Docker)
-COPY pyproject.toml poetry.lock* ./
+# Instala as dependências do Python usando o cache do BuildKit para o PIP
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
-# Instala as bibliotecas do Python sem criar ambiente virtual (o container já é isolado)
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-root --no-interaction --no-ansi
-
-# Copia o restante do código do backend, incluindo a pasta app e o modelo IA
+# Copia o restante do código
 COPY . .
 
 EXPOSE 8000
 
-# Comando para iniciar o servidor do FastAPI
+# Comando para iniciar o servidor
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

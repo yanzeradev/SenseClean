@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Upload, Play, Trash2, PencilLine, CheckCircle2, RefreshCw } from "lucide-react";
+import { Upload, Play, Trash2, PencilLine, CheckCircle2, RefreshCw, AlertCircle } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Point { x: number; y: number; }
@@ -247,6 +247,15 @@ export function VideoAnalysis() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {stage === 'error' && (
+            <div className="text-center p-8 border border-red-900/50 rounded-xl bg-red-950/20 mt-4">
+              <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold mb-2 text-white">Falha no Processamento</h2>
+              <p className="text-gray-400 mb-6">Ocorreu um erro interno ao gerar o arquivo de relatório.</p>
+              <Button onClick={resetApp} variant="destructive">Tentar Novamente</Button>
             </div>
           )}
         </CardContent>
