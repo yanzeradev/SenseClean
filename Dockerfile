@@ -13,9 +13,12 @@ WORKDIR /app
 # Copia apenas o requirements primeiro para aproveitar o cache do Docker
 COPY requirements.txt .
 
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 # Instala as dependências do Python usando o cache do BuildKit para o PIP
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+    pip wheel -r requirements.txt
 
 # Copia o restante do código
 COPY . .
