@@ -12,6 +12,8 @@ from typing import Dict, Any
 from collections import defaultdict, deque
 import supervision as sv
 import math
+import threading
+from queue import Queue, Empty
 
 from app.database import SessionLocal
 from app.repositories.device import DeviceRepository
@@ -133,6 +135,33 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
         
         await asyncio.sleep(3)
 
+def _camera_reader_worker(rtsp_url: str, frame_queue: Queue, stop_event: asyncio.Event):
+    """
+    Trabalhador invisível. Lê a câmera sem parar para que a rede nunca crie delay.
+    """
+    # Aumentar o timeout para evitar quedas e reduzir buffer para pegar sempre o "agora"
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000|max_delay;5000000"
+    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            time.sleep(0.1) # Aguarda um pouco se a câmera falhar
+            continue
+
+        # Se a fila estiver cheia (IA não leu ainda), descarta o frame velho e coloca o novo
+        # Isso GARANTE 0 delay! A IA sempre pegará o frame daquele exato milissegundo.
+        if frame_queue.full():
+            try:
+                frame_queue.get_nowait()
+            except Empty:
+                pass
+        
+        frame_queue.put(frame)
+        
+    cap.release()
+
 async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, stop_event: asyncio.Event, tracker: BaseTracker):
     """
     O Motor inspirado no SenseOpen: Usa OpenCV puro e processa os trackers de forma eficiente.
@@ -166,6 +195,17 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             requests.put("http://go2rtc:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=3)
         except Exception: 
             local_rtsp = rtsp_url
+
+        print(f"🔌 Ingestão Dedicada (Thread): {local_rtsp}")
+
+        # 💥 MÁGICA 1: Criamos o canal de comunicação e ligamos o Trabalhador Invisível
+        frame_queue = Queue(maxsize=1) # Guarda apenas 1 frame (o mais recente)
+        reader_thread = threading.Thread(
+            target=_camera_reader_worker, 
+            args=(local_rtsp, frame_queue, stop_event),
+            daemon=True
+        )
+        reader_thread.start()
 
         print(f"🔌 Ingestão OpenCV: {local_rtsp}")
 
@@ -207,23 +247,22 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         dwell_timers = {} 
 
         while not stop_event.is_set():
-            # Leitura assíncrona do OpenCV
-            ret, frame = await asyncio.to_thread(cap.read)
             
-            if not ret:
-                print(f"⚠️ Perda de sinal na câmera {device_id}. Reconectando...")
-                await asyncio.sleep(5)
-                break 
+            # 💥 MÁGICA 2: Pegamos o frame mais recente da fila
+            try:
+                # O timeout impede que o loop trave se a câmera cair
+                frame = frame_queue.get(timeout=2.0) 
+            except Empty:
+                print(f"⚠️ Perda de sinal na câmera {device_id}. Aguardando...")
+                await asyncio.sleep(2)
+                continue
             
             frame_count += 1
-
-            # Snapshot Cache (Sem travar a CPU)
-            if time.time() - last_snap > 1.0:
-                ret_clean, buffer_clean = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
-                if ret_clean: latest_frames[device_id] = buffer_clean.tobytes()
-                last_snap = time.time()
             qtd_cameras = max(1, len(active_tasks))
             
+            # 💥 MÁGICA 3: O marcha_ia agora funciona perfeitamente!
+            # Se o marcha for 15, a IA só processa 1 frame e os outros 14 
+            # foram lidos e descartados instantaneamente pela Thread Invisível lá no fundo!
             marcha_ia = qtd_cameras * 3
 
             if frame_count % marcha_ia == 0:
