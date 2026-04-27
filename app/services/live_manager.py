@@ -135,32 +135,40 @@ async def scheduler_loop(detector: BaseDetector, tracker: BaseTracker):
         
         await asyncio.sleep(3)
 
-def _camera_reader_worker(rtsp_url: str, frame_queue: Queue, stop_event: asyncio.Event):
+def _camera_reader_worker(rtsp_url: str, cam_data: dict, stop_event: asyncio.Event):
     """
-    Trabalhador invisível. Lê a câmera sem parar para que a rede nunca crie delay.
+    Trabalhador invisível. Tenta conectar e atualiza a foto na memória na velocidade da rede.
     """
-    # Aumentar o timeout para evitar quedas e reduzir buffer para pegar sempre o "agora"
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000|max_delay;5000000"
-    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
+    cap = None
+    
     while not stop_event.is_set():
+        # Se a câmera não existe ou caiu, tenta (re)conectar de fundo
+        if cap is None or not cap.isOpened():
+            cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if not cap.isOpened():
+                cam_data["online"] = False
+                time.sleep(2) # Espera 2s antes de tentar de novo
+                continue
+                
         ret, frame = cap.read()
+        
+        # Se a rede oscilar e falhar o frame
         if not ret:
-            time.sleep(0.1) # Aguarda um pouco se a câmera falhar
+            cam_data["online"] = False
+            cap.release()
+            cap = None
+            time.sleep(1)
             continue
 
-        # Se a fila estiver cheia (IA não leu ainda), descarta o frame velho e coloca o novo
-        # Isso GARANTE 0 delay! A IA sempre pegará o frame daquele exato milissegundo.
-        if frame_queue.full():
-            try:
-                frame_queue.get_nowait()
-            except Empty:
-                pass
+        # MÁGICA: Substitui a foto instantaneamente na memória RAM
+        cam_data["frame"] = frame
+        cam_data["online"] = True
         
-        frame_queue.put(frame)
-        
-    cap.release()
+    if cap:
+        cap.release()
+
 
 async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, stop_event: asyncio.Event, tracker: BaseTracker):
     """
@@ -192,28 +200,24 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         local_rtsp = f"rtsp://go2rtc:8554/{stream_name}"
         
         try:
-            requests.put("http://go2rtc:1984/api/streams", params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=3)
+            # Jogamos o Requests para uma thread para ele não travar o FastAPI!
+            await asyncio.to_thread(
+                requests.put, "http://go2rtc:1984/api/streams", 
+                params={"src": rtsp_for_go2rtc, "name": stream_name}, timeout=2
+            )
         except Exception: 
             local_rtsp = rtsp_url
 
-        print(f"🔌 Ingestão Dedicada (Thread): {local_rtsp}")
+        print(f"🔌 Ingestão de Memória: {local_rtsp}")
 
-        # 💥 MÁGICA 1: Criamos o canal de comunicação e ligamos o Trabalhador Invisível
-        frame_queue = Queue(maxsize=1) # Guarda apenas 1 frame (o mais recente)
+        # 💥 O FIM DAS FILAS: Usamos um dicionário compartilhado simples e à prova de falhas
+        cam_data = {"frame": None, "online": False}
         reader_thread = threading.Thread(
             target=_camera_reader_worker, 
-            args=(local_rtsp, frame_queue, stop_event),
+            args=(local_rtsp, cam_data, stop_event),
             daemon=True
         )
         reader_thread.start()
-
-        print(f"🔌 Ingestão OpenCV: {local_rtsp}")
-
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000|max_delay;5000000"
-        
-        cap = cv2.VideoCapture(local_rtsp, cv2.CAP_FFMPEG)
-        
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
 
         entrant_line = lines_config.get('entrant', [])
         passerby_line = lines_config.get('passerby', [])
@@ -248,37 +252,31 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
 
         while not stop_event.is_set():
             
-            # 💥 MÁGICA 2: Pegamos o frame mais recente da fila
-            try:
-                # O timeout impede que o loop trave se a câmera cair
-                frame = frame_queue.get(timeout=2.0) 
-            except Empty:
-                print(f"⚠️ Perda de sinal na câmera {device_id}. Aguardando...")
-                await asyncio.sleep(2)
+            # Se a câmera caiu, o FastAPI apenas "dorme" por meio segundo e deixa o site funcionar!
+            if not cam_data["online"] or cam_data["frame"] is None:
+                await asyncio.sleep(0.5)
                 continue
-            
-            frame_count += 1
-            qtd_cameras = max(1, len(active_tasks))
-            
-            # 💥 MÁGICA 3: O marcha_ia agora funciona perfeitamente!
-            # Se o marcha for 15, a IA só processa 1 frame e os outros 14 
-            # foram lidos e descartados instantaneamente pela Thread Invisível lá no fundo!
-            marcha_ia = qtd_cameras * 3
-
-            if frame_count % marcha_ia == 0:
-                # 1. Pega o resultado (que agora é um Dicionário)
-                tracking_result = await asyncio.to_thread(tracker.update, None, frame)
-                last_tracks = tracking_result
-
-                # 2. Extrai a lista de pessoas (analytics_data) e as máscaras (sv_detections)
-                tracks = tracking_result.get("analytics_data", [])
-                sv_detections = tracking_result.get("sv_detections")
                 
-                # 3. Agora sim, mandamos uma LISTA para o analytics, e não o dicionário!
-                analytics.update(tracks)
+            # Pega uma cópia da foto mais fresca disponível na memória
+            frame = cam_data["frame"].copy()
+
+            # Snapshot Cache (Sem travar a CPU)
+            if time.time() - last_snap > 1.0:
+                ret_clean, buffer_clean = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                if ret_clean: latest_frames[device_id] = buffer_clean.tobytes()
+                last_snap = time.time()
+
+            # 💥 ADEUS MARCHA_IA: Como o frame na memória é sempre o do exato milissegundo,
+            # não precisamos mais calcular lixo de rede. A IA roda no talo do que a GPU aguentar!
+            tracking_result = await asyncio.to_thread(tracker.update, None, frame)
+            
+            tracks = tracking_result.get("analytics_data", [])
+            sv_detections = tracking_result.get("sv_detections")
+
+            analytics.update(tracks)
 
                 # Lógica do Mapa de Calor
-                if lines_config.get("modules", {}).get("heatmap", False):
+            if lines_config.get("modules", {}).get("heatmap", False):
                     if device_id not in heatmap_data:
                         heatmap_data[device_id] = []
                     
@@ -441,12 +439,11 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     print(f"Erro ao salvar estatísticas: {e}")
                 last_save = time.time()
             
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0.01)
 
     except Exception as e:
         print(f"❌ Erro fatal Câmera {device_id}: {traceback.format_exc()}")
     finally:
-        if 'cap' in locals(): cap.release()
         db.close()
         if device_id in live_frames: del live_frames[device_id]
         if device_id in latest_frames: del latest_frames[device_id]
