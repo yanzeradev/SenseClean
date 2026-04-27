@@ -1,5 +1,6 @@
 import asyncio
 import cv2
+import supervision as sv
 import numpy as np # NEEDED FOR SCALING
 from app.database import SessionLocal
 from app.repositories.video import VideoRepository
@@ -52,7 +53,6 @@ async def process_video_background(video_id: str, video_path: str, request_data:
     detector = YoloDetector(model_path=str(MODEL_PATH))
     tracker = YoloTracker(model_path=str(MODEL_PATH))
     
-    # Inject the scaled lines into the Analytics engine
     analytics = ZoneAnalytics(
         entrant_line=scaled_entrant_line, 
         passerby_line=scaled_passerby_line, 
@@ -60,17 +60,21 @@ async def process_video_background(video_id: str, video_path: str, request_data:
     )
     
     pipeline = VideoPipeline(video_source=video_path, detector=detector, tracker=tracker)
-    current_frame = 0
+    
+   # 💥 PINCÉIS PARA O VIDEO: Mesma estética Premium do Live_Manager
+    box_annotator = sv.BoxAnnotator(thickness=2)
+    label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
+    trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=60, position=sv.Position.BOTTOM_CENTER)
 
     try:
         job["ready_event"].set()
-        start_time = time.time() # 💥 Inicia o cronômetro do processamento
+        start_time = time.time() 
         frames_processados = 0
         
         async for frame, tracking_result in pipeline.process():
             
-            # 💥 CORREÇÃO: Extrai a lista de pessoas do novo dicionário do Tracker
             tracks = tracking_result.get("analytics_data", [])
+            detections = tracking_result.get("sv_detections") # Pega o objeto já tratado
             
             analytics.update(tracks)
             
@@ -84,14 +88,26 @@ async def process_video_background(video_id: str, video_path: str, request_data:
             draw_polyline(frame, scaled_entrant_line, (0, 255, 0)) 
             draw_polyline(frame, scaled_passerby_line, (0, 255, 255)) 
 
-            for track in tracks:
-                x1, y1, x2, y2 = map(int, track["bbox"])
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID: {track['track_id']}", (x1, y1 - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            # 💥 NOVA MÁGICA VISUAL MODERNIZADA PARA OS VÍDEOS
+            if detections is not None and len(detections) > 0:
+                
+                # Efeito Vidro Transparente
+                overlay = frame.copy()
+                for bbox, class_id in zip(detections.xyxy, detections.class_id):
+                    x1, y1, x2, y2 = map(int, bbox)
+                    color = sv.ColorPalette.DEFAULT.by_idx(class_id).as_bgr()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
+
+                # Bordas e Rastros
+                frame = box_annotator.annotate(scene=frame, detections=detections)
+                frame = trace_annotator.annotate(scene=frame, detections=detections)
+                
+                labels = [f"ID: {tracker_id}" for tracker_id in detections.tracker_id]
+                frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
             
-            cv2.putText(frame, f"Entrants: {analytics.counts['entrant']}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-            cv2.putText(frame, f"Passerby: {analytics.counts['passerby']}", (30, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            cv2.rectangle(frame, (10, 10), (250, 100), (0, 0, 0), -1)
+            cv2.putText(frame, f"Entrantes: {analytics.counts['entrant']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
             out.write(frame)
             success, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60]) # Reduza a qualidade pra 60 pra ficar mais leve!

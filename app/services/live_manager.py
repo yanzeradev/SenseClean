@@ -225,22 +225,51 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         )
         reader_thread.start()
 
+        # 💥 NOVO: Aguarda o primeiro frame da câmera para calcular a escala exata
+        while cam_data["frame"] is None and not stop_event.is_set():
+            await asyncio.sleep(0.1)
+            
+        if stop_event.is_set():
+            db.close()
+            return
+            
+        frame_h, frame_w = cam_data["frame"].shape[:2]
+
         entrant_line = lines_config.get('entrant', [])
         passerby_line = lines_config.get('passerby', [])
+        polygon_points = lines_config.get('polygon', [])
         in_side = lines_config.get('in_side', 'right')
+        canvas_dims = lines_config.get('canvas_dims', {})
+
+        # 💥 MÁGICA DA ESCALA: Estica as coordenadas minúsculas do UI para o vídeo gigante
+        if canvas_dims and canvas_dims.get('width') and canvas_dims.get('height'):
+            scale_x = frame_w / canvas_dims['width']
+            scale_y = frame_h / canvas_dims['height']
+            
+            def scale_points(pts):
+                return [{'x': int(p['x'] * scale_x), 'y': int(p['y'] * scale_y)} for p in pts]
+                
+            entrant_line = scale_points(entrant_line)
+            passerby_line = scale_points(passerby_line)
+            polygon_points = scale_points(polygon_points)
+
         analytics = ZoneAnalytics(entrant_line, passerby_line, in_side)
         analytics.counts["entrant"] = bagagem_entrantes
         analytics.counts["passerby"] = bagagem_passantes
         
+        # Devolve o polígono já esticado para o Supervision desenhar corretamente
+        lines_config['polygon'] = polygon_points 
+        
         last_save = time.time()
+
         last_snap = 0
         frame_count = 0
         last_tracks = {"analytics_data": [], "sv_detections": None} 
         
+        # 💥 PINCÉIS MODERNOS REVERTIDOS E SEGUROS
         box_annotator = sv.BoxAnnotator(thickness=2)
         label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
-        
-        mask_annotator = sv.MaskAnnotator()
+        trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=60, position=sv.Position.BOTTOM_CENTER)
         
         # Lógica Opcional do PolygonZone
         polygon_points = lines_config.get('polygon', [])
@@ -281,7 +310,7 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
 
             analytics.update(tracks)
 
-                # Lógica do Mapa de Calor
+             # Lógica do Mapa de Calor
             if lines_config.get("modules", {}).get("heatmap", False):
                     if device_id not in heatmap_data:
                         heatmap_data[device_id] = []
@@ -294,18 +323,10 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     # Limita a memória a 10.000 pontos
                     if len(heatmap_data[device_id]) > 10000:
                         heatmap_data[device_id] = heatmap_data[device_id][-10000:]
-            else:
-                # Nos frames pulados, recuperamos da memória com segurança
-                tracking_result = last_tracks
-                if isinstance(tracking_result, dict):
-                    tracks = tracking_result.get("analytics_data", [])
-                    sv_detections = tracking_result.get("sv_detections")
-                else:
-                    tracks = []
-                    sv_detections = None
+           
 
-            if len(tracks) > 0:
-                print(f"👀 CAM {device_id} Vendo {len(tracks)} pessoa(s) | Bounding Box do ID {tracks[0]['track_id']}: {tracks[0]['bbox']}")
+            #if len(tracks) > 0:
+            #    print(f"👀 CAM {device_id} Vendo {len(tracks)} pessoa(s) | Bounding Box do ID {tracks[0]['track_id']}: {tracks[0]['bbox']}")
 
             # --- DESENHO EM TELA ---
             if len(tracks) > 0:
@@ -318,49 +339,35 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     tracker_id=tracker_id,
                     class_id=class_id
                 )
+                
+                # 💥 CORREÇÃO: Garante que "current_ids" exista independente dos rastros,
+                # senão o cálculo do "Dwell Time" quebra lá embaixo!
+                current_ids = [t["track_id"] for t in tracks]
 
-                # 💥 1. RASTRO ESTILO "COMETA FLUIDO" (Costurando os frames)
+                # 💥 1. EFEITO VIDRO (Transparência à prova de falhas com OpenCV)
+                overlay = frame.copy()
+                for bbox, class_id in zip(detections.xyxy, detections.class_id):
+                    x1, y1, x2, y2 = map(int, bbox)
+                    # Pega a cor correspondente ao ID da classe na paleta do Supervision
+                    color = sv.ColorPalette.DEFAULT.by_idx(class_id).as_bgr()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                
+                # Mescla a camada de cor com 25% de opacidade na foto original
+                cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
+
+                # 💥 2. BORDAS FINAS E RASTROS MODERNOS
+                frame = box_annotator.annotate(scene=frame, detections=detections)
+
                 if lines_config.get("modules", {}).get("trails", False):
-                    current_ids = [t["track_id"] for t in tracks]
-                    for tid in list(track_history.keys()):
-                        if tid not in current_ids:
-                            del track_history[tid]
-
-                    for track in tracks:
-                        tid = track['track_id']
-                        # Centro da cintura
-                        cx = int((track["bbox"][0] + track["bbox"][2]) / 2)
-                        cy = int((track["bbox"][1] + track["bbox"][3]) / 2)
-                        
-                        # Guarda a posição (Pode tirar o math.sqrt, queremos todos os frames válidos)
-                        track_history[tid].append((cx, cy))
-                        
-                        history = list(track_history[tid])
-                        history_len = len(history)
-                        
-                        # MÁGICA VISUAL: Preenchendo os buracos
-                        if history_len > 1:
-                            for i in range(1, history_len):
-                                pt1 = history[i - 1]
-                                pt2 = history[i]
-                                
-                                # A espessura cresce suavemente (da ponta mais fina até 10px no corpo da pessoa)
-                                thickness = int(10 * (i / history_len)) + 1
-                                
-                                # 1. Desenha a linha ligando um ponto ao outro (isso tapa o buraco do FPS)
-                                cv2.line(frame, pt1, pt2, (255, 0, 255), thickness, cv2.LINE_AA)
-                                
-                                # 2. Desenha a bolha arredondada nas emendas para o traço ficar macio
-                                cv2.circle(frame, pt2, thickness // 2, (255, 0, 255), -1, cv2.LINE_AA)
+                    frame = trace_annotator.annotate(scene=frame, detections=detections)
 
                 labels = []
                 current_time = time.time()
                 
-                # Verifica quem está dentro do Polígono (Se ele existir)
                 is_inside = [False] * len(tracks)
                 if zone is not None:
                     is_inside = zone.trigger(detections=detections)
-                    frame = zone_annotator.annotate(scene=frame) # Desenha a zona translúcida
+                    frame = zone_annotator.annotate(scene=frame) 
 
                 for tid in list(dwell_timers.keys()):
                     if tid not in current_ids:
@@ -381,17 +388,7 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     
                     labels.append(label)
 
-                # 💥 O GRANDE FINAL: DESENHANDO A SILHUETA
-                # Se as máscaras existirem (Modelo de Segmentação), ele pinta o corpo!
-                if sv_detections.mask is not None:
-                    frame = mask_annotator.annotate(scene=frame, detections=sv_detections)
-                else:
-                    # Se cair aqui, é porque o modelo antigo (Sem Máscara) teimou em rodar!
-                    print("⚠️ AVISO: Máscaras não encontradas! A IA ainda está usando o modelo de Bounding Box.")
-                    frame = box_annotator.annotate(scene=frame, detections=sv_detections)
-
-                # Desenha a Etiqueta (ID e Tempo) por cima da silhueta
-                frame = label_annotator.annotate(scene=frame, detections=sv_detections, labels=labels)
+                frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
 
             # --- Linhas de Contagem (Verde e Amarelo) ---
             if len(entrant_line) > 1:

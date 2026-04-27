@@ -8,7 +8,8 @@ import { api } from "@/lib/api";
 
 interface Point { x: number; y: number; }
 
-const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, polygonPoints, setPolygonPoints, activeLine, inSide }: any) => {
+// 💥 1. Recebemos o dimsRef aqui
+const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, polygonPoints, setPolygonPoints, activeLine, inSide, dimsRef }: any) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -39,9 +40,14 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
         if (!cvs || !img || isLoading) return;
 
         const render = () => {
-            // MÁGICA: Mapeamento 1:1 com o tamanho que está visível na tela
             cvs.width = cvs.clientWidth;
             cvs.height = cvs.clientHeight;
+            
+            // 💥 2. Salva o tamanho silenciosamente sem dar crash no React
+            if (dimsRef) {
+                dimsRef.current = { width: cvs.width, height: cvs.height };
+            }
+            
             const ctx = cvs.getContext('2d');
             if (!ctx) return;
             ctx.clearRect(0, 0, cvs.width, cvs.height);
@@ -151,10 +157,12 @@ export function DeviceList() {
 
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
   const [entrantPoints, setEntrantPoints] = useState<Point[]>([]);
+  const canvasDimsRef = useRef({ width: 640, height: 360 });
   const [passerbyPoints, setPasserbyPoints] = useState<Point[]>([]);
   const [polygonPoints, setPolygonPoints] = useState<Point[]>([]);
   const [activeLine, setActiveLine] = useState<'entrant' | 'passerby' | 'polygon'>('entrant');
   const [inSide, setInSide] = useState<'right' | 'left'>('right');
+  const [canvasDims, setCanvasDims] = useState({ width: 0, height: 0 });
 
   const [modules, setModules] = useState({
     heatmap: false,
@@ -218,6 +226,7 @@ export function DeviceList() {
       if (dev.lines_config) {
           setEntrantPoints(dev.lines_config.entrant || []);
           setPasserbyPoints(dev.lines_config.passerby || []);
+          setPolygonPoints(dev.lines_config.polygon || []);
           setInSide(dev.lines_config.in_side || 'right');
           // Carrega os módulos salvos ou deixa falso como padrão
           setModules(dev.lines_config.modules || { heatmap: false, trails: false, dwell: false, loitering: false });
@@ -233,8 +242,15 @@ export function DeviceList() {
   const handleSaveConfig = async () => {
     if(!activeDevice) return;
     try {
-      // Salva os pontos E os módulos de inteligência ativados
-      const linesConfig = { entrant: entrantPoints, passerby: passerbyPoints, in_side: inSide, modules };
+      // 💥 4. Enviamos as coordenadas e o tamanho exato da tela para a API
+      const linesConfig = { 
+          entrant: entrantPoints, 
+          passerby: passerbyPoints, 
+          polygon: polygonPoints, 
+          in_side: inSide, 
+          modules: modules,
+          canvas_dims: canvasDimsRef.current 
+      };
       
       await api.put(`/devices/${activeDevice.id}/config`, {
         name: configForm.name,
@@ -424,6 +440,7 @@ export function DeviceList() {
                         passerbyPoints={passerbyPoints} setPasserbyPoints={setPasserbyPoints} 
                         polygonPoints={polygonPoints} setPolygonPoints={setPolygonPoints} 
                         activeLine={activeLine} inSide={inSide} 
+                        dimsRef={canvasDimsRef} // 💥 5. Passamos a referência
                      />
                  ) : (
                      <div className="w-full h-64 bg-gray-800 animate-pulse rounded-lg flex items-center justify-center">Carregando imagem...</div>
