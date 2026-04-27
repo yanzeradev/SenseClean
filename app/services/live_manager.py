@@ -266,8 +266,13 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
         frame_count = 0
         last_tracks = {"analytics_data": [], "sv_detections": None} 
         
-        # 💥 PINCÉIS PREMIUM: Borda Arredondada + Rastro pelo Centro
-        box_annotator = sv.RoundBoxAnnotator(thickness=2, roundness=0.3) # 'roundness' de 0.0 a 1.0 define a curva
+        # --- MOTION GATING SETUP ---
+        background_frame = None
+        motion_cooldown_frames = 0
+        MOTION_PIXEL_THRESHOLD = 1500  # Minimum changed pixels to wake up the GPU
+        
+        # Premium Brushes
+        box_annotator = sv.RoundBoxAnnotator(thickness=2, roundness=0.3)
         label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
         trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=60, position=sv.Position.CENTER)
         
@@ -295,15 +300,44 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             # Pega uma cópia da foto mais fresca disponível na memória
             frame = cam_data["frame"].copy()
 
-            # Snapshot Cache (Sem travar a CPU)
+            # Snapshot Cache
             if time.time() - last_snap > 1.0:
                 ret_clean, buffer_clean = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
                 if ret_clean: latest_frames[device_id] = buffer_clean.tobytes()
                 last_snap = time.time()
 
-            # 💥 ADEUS MARCHA_IA: Como o frame na memória é sempre o do exato milissegundo,
-            # não precisamos mais calcular lixo de rede. A IA roda no talo do que a GPU aguentar!
-            tracking_result = await asyncio.to_thread(tracker.update, None, frame)
+            # --- MOTION GATING (CPU-BASED) ---
+            # Convert frame to grayscale and blur to remove minor noise
+            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray_frame = cv2.GaussianBlur(gray_frame, (21, 21), 0)
+
+            # Initialize background on the first frame
+            if background_frame is None:
+                background_frame = gray_frame.copy().astype("float")
+
+            # Accumulate weighted average to adapt to gradual lighting changes
+            cv2.accumulateWeighted(gray_frame, background_frame, 0.05)
+            
+            # Compute absolute difference between current frame and background
+            frame_delta = cv2.absdiff(gray_frame, cv2.convertScaleAbs(background_frame))
+            _, motion_mask = cv2.threshold(frame_delta, 25, 255, cv2.THRESH_BINARY)
+            
+            # Count changed pixels
+            motion_level = cv2.countNonZero(motion_mask)
+            
+            if motion_level > MOTION_PIXEL_THRESHOLD:
+                # Wake up the GPU and keep it awake for 30 frames to prevent tracking loss
+                motion_cooldown_frames = 30 
+
+            if motion_cooldown_frames > 0:
+                # 💥 MOTION DETECTED: GPU PROCESSING (TENSORRT)
+                tracking_result = await asyncio.to_thread(tracker.update, None, frame)
+                motion_cooldown_frames -= 1
+            else:
+                # 💤 NO MOTION: BYPASS GPU (AI SLEEPING)
+                tracking_result = {"analytics_data": [], "sv_detections": None}
+                # Optional visual indicator for debugging
+                cv2.putText(frame, "MOTION GATING: SLEEPING", (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 100), 2)
             
             tracks = tracking_result.get("analytics_data", [])
             sv_detections = tracking_result.get("sv_detections")
