@@ -61,10 +61,10 @@ async def process_video_background(video_id: str, video_path: str, request_data:
     
     pipeline = VideoPipeline(video_source=video_path, detector=detector, tracker=tracker)
     
-   # 💥 PINCÉIS PARA O VIDEO: Mesma estética Premium do Live_Manager
-    box_annotator = sv.BoxAnnotator(thickness=2)
+   # 💥 PINCÉIS PREMIUM: Borda Arredondada + Rastro pelo Centro
+    box_annotator = sv.RoundBoxAnnotator(thickness=2, roundness=0.3) # 'roundness' de 0.0 a 1.0 define a curva
     label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
-    trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=60, position=sv.Position.BOTTOM_CENTER)
+    trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=60, position=sv.Position.CENTER)
 
     try:
         job["ready_event"].set()
