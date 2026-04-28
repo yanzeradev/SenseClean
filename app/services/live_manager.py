@@ -193,10 +193,12 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
     
     bagagem_resultados = sessao_diaria.results or {
         "entrantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
+        "saidas": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
         "passantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
         "total_geral": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
     }
     bagagem_entrantes = bagagem_resultados.get("entrantes", {}).get("Total", 0)
+    bagagem_saidas = bagagem_resultados.get("saidas", {}).get("Total", 0)
     bagagem_passantes = bagagem_resultados.get("passantes", {}).get("Total", 0)
 
     try:
@@ -254,8 +256,9 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             polygon_points = scale_points(polygon_points)
 
         analytics = ZoneAnalytics(entrant_line, passerby_line, in_side)
-        analytics.counts["entrant"] = bagagem_entrantes
-        analytics.counts["passerby"] = bagagem_passantes
+        analytics.counts["entrantes"] = bagagem_entrantes
+        analytics.counts["saidas"] = bagagem_saidas
+        analytics.counts["passantes"] = bagagem_passantes
         
         # Devolve o polígono já esticado para o Supervision desenhar corretamente
         lines_config['polygon'] = polygon_points 
@@ -433,10 +436,11 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                 pts = np.array([ [p['x'], p['y']] for p in passerby_line ], np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [pts], False, (0, 255, 255), 3)
 
-            # Placares
-            cv2.rectangle(frame, (10, 10), (250, 100), (0, 0, 0), -1)
-            cv2.putText(frame, f"Entrantes: {analytics.counts['entrant']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            cv2.putText(frame, f"Passantes: {analytics.counts['passerby']}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            # Placares na Tela
+            cv2.rectangle(frame, (10, 10), (250, 140), (0, 0, 0), -1)
+            cv2.putText(frame, f"Entrantes: {analytics.counts['entrantes']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.putText(frame, f"Saidas: {analytics.counts['saidas']}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            cv2.putText(frame, f"Passantes: {analytics.counts['passantes']}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             # --- STREAM MJPEG PARA DASHBOARD ---
             ret_live, buffer_live = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
@@ -450,16 +454,13 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
                     
                     old_events = bagagem_resultados.get("recent_events", [])
                     new_events = atuais.get("recent_events", [])
-                    
-                    # Apenas junta as listas e pega os 100 últimos. 
-                    # Isso evita o bug de deletar quem passa no mesmo exato segundo!
                     combined_events = sorted(old_events + new_events, key=lambda x: x["time"], reverse=True)[:100]
 
-                    # Usa sempre um dicionário padrão como base para evitar chaves faltantes (KeyError)
                     base_keys = {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
 
                     merged_results = {
                         "entrantes": {k: atuais["entrantes"].get(k, 0) + bagagem_resultados.get("entrantes", base_keys).get(k, 0) for k in base_keys},
+                        "saidas": {k: atuais["saidas"].get(k, 0) + bagagem_resultados.get("saidas", base_keys).get(k, 0) for k in base_keys},
                         "passantes": {k: atuais["passantes"].get(k, 0) + bagagem_resultados.get("passantes", base_keys).get(k, 0) for k in base_keys},
                         "total_geral": {k: atuais.get("total_geral", base_keys).get(k, 0) + bagagem_resultados.get("total_geral", base_keys).get(k, 0) for k in base_keys},
                         "recent_events": combined_events

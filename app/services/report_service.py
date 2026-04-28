@@ -14,6 +14,7 @@ class ReportService:
         
         dados_planilha = {
             "entrantes": results.get("entrantes", {}),
+            "saidas": results.get("saidas", {}),
             "passantes": results.get("passantes", {}),
             "total_geral": results.get("total_geral", {})
         }

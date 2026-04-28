@@ -79,6 +79,7 @@ class VideoRepository:
             reference_date=today,
             results={
                 "entrantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
+                "saidas": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0},
                 "passantes": {"Homem": 0, "Mulher": 0, "NaoIdentificado": 0, "Total": 0}
             }
         )

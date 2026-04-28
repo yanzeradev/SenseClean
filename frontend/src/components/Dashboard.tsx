@@ -76,9 +76,9 @@ export function Dashboard() {
     const devId = selectedSession.id.split('_')[1].replace('cam', '');
     const res = selectedSession.results || {};
     const entrantes = res.entrantes?.Total || 0;
+    const saidas = res.saidas?.Total || 0;
     const passantes = res.passantes?.Total || 0;
-    const ocupacaoAtual = Math.max(0, entrantes - passantes);
-    const totalMovimento = entrantes + passantes;
+    const ocupacaoAtual = Math.max(0, entrantes - saidas);
 
     const chartData: any[] = []; 
     const recentData: any[] = res.recent_events?.slice(0, 15) || []; 
@@ -117,13 +117,6 @@ export function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="bg-gray-900/50 border-gray-800">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-400">TOTAL HOJE</CardTitle>
-              <Users className="w-4 h-4 text-blue-500" />
-            </CardHeader>
-            <CardContent><div className="text-3xl font-bold text-white">{totalMovimento}</div></CardContent>
-          </Card>
-          <Card className="bg-gray-900/50 border-gray-800">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-400">ENTRADAS</CardTitle>
               <ArrowRightToLine className="w-4 h-4 text-green-500" />
             </CardHeader>
@@ -132,7 +125,14 @@ export function Dashboard() {
           <Card className="bg-gray-900/50 border-gray-800">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-gray-400">SAÍDAS</CardTitle>
-              <ArrowLeftFromLine className="w-4 h-4 text-yellow-500" />
+              <ArrowLeftFromLine className="w-4 h-4 text-red-500" />
+            </CardHeader>
+            <CardContent><div className="text-3xl font-bold text-white">{saidas}</div></CardContent>
+          </Card>
+          <Card className="bg-gray-900/50 border-gray-800">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-gray-400">PASSANTES</CardTitle>
+              <Users className="w-4 h-4 text-yellow-500" />
             </CardHeader>
             <CardContent><div className="text-3xl font-bold text-white">{passantes}</div></CardContent>
           </Card>
@@ -171,7 +171,7 @@ export function Dashboard() {
                     {recentData.map((item: any, i: number) => (
                       <div key={i} className="flex items-center justify-between border-b border-gray-800 pb-3 last:border-0">
                         <div>
-                          <p className={`text-sm font-bold ${item.type === 'Entrada' ? 'text-green-500' : 'text-yellow-500'}`}>
+                          <p className={`text-sm font-bold ${item.type === 'Entrada' ? 'text-green-500' : item.type === 'Saída' ? 'text-red-500' : 'text-yellow-500'}`}>
                             {item.type}
                           </p>
                           <p className="text-xs text-gray-400">{item.gender}</p>
@@ -357,9 +357,10 @@ export function Dashboard() {
                     {/* Se estiver concluído, mostra resumo e botão de download */}
                     {video.status === 'completed' && video.results && (
                       <div className="mt-auto space-y-3">
-                        <div className="flex justify-between text-sm bg-gray-950 p-2 rounded border border-gray-800">
-                          <span className="text-green-400">Entraram: {video.results.entrantes?.Total || 0}</span>
-                          <span className="text-yellow-400">Saíram: {video.results.passantes?.Total || 0}</span>
+                        <div className="flex justify-between text-xs bg-gray-950 p-2 rounded border border-gray-800 font-medium">
+                          <span className="text-green-400">IN: {video.results.entrantes?.Total || 0}</span>
+                          <span className="text-red-400">OUT: {video.results.saidas?.Total || 0}</span>
+                          <span className="text-yellow-400">PASS: {video.results.passantes?.Total || 0}</span>
                         </div>
                         <Button 
                           variant="outline" 
