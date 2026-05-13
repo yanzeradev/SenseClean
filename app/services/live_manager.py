@@ -330,7 +330,7 @@ async def run_live_camera(device_id: int, rtsp_url: str, lines_config: dict, sto
             
             if motion_level > MOTION_PIXEL_THRESHOLD:
                 # Wake up the GPU and keep it awake for 30 frames to prevent tracking loss
-                motion_cooldown_frames = 30 
+                motion_cooldown_frames = 150 
 
             if motion_cooldown_frames > 0:
                 # 💥 MOTION DETECTED: GPU PROCESSING (TENSORRT)

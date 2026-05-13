@@ -60,15 +60,21 @@ class ZoneAnalytics:
             if state['final_action'] not in ['entrante', 'saida']:
                 direction = check_intersection_and_direction(last_center, curr_center, self.entrant_line, self.in_side)
                 
-                if direction == 'in':
-                    self.counts["entrantes"] += 1
-                    state['final_action'] = 'entrante'
-                    self._log_event("Entrada", cls_id)
+                if direction in ['in', 'out']:
+                    if state['final_action'] == 'passante':
+                        self.counts["passantes"] = max(0, self.counts["passantes"] - 1)
+                        # Remove o log antigo de passante para não sujar o painel (opcional)
+                        self.recent_events = [e for e in self.recent_events if e.get("type") != "Passante"]
                     
-                elif direction == 'out':
-                    self.counts["saidas"] += 1
-                    state['final_action'] = 'saida'
-                    self._log_event("Saída", cls_id)
+                    if direction == 'in':
+                        self.counts["entrantes"] += 1
+                        state['final_action'] = 'entrante'
+                        self._log_event("Entrada", cls_id)
+                        
+                    elif direction == 'out':
+                        self.counts["saidas"] += 1
+                        state['final_action'] = 'saida'
+                        self._log_event("Saída", cls_id)
 
             # 2. Lógica da Linha de Passantes
             if state['final_action'] is None:

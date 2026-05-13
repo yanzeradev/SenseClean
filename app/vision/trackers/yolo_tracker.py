@@ -8,7 +8,7 @@ class YoloTracker(BaseTracker):
     Implementation of BaseTracker using Ultralytics' built-in BoT-SORT/ByteTrack.
     """
     # MÁGICA 1: Trocando para bytetrack (Mais rápido e ignora perdas de frames)
-    def __init__(self, model_path: str, tracker_type: str = "bytetrack.yaml"):
+    def __init__(self, model_path: str, tracker_type: str = "botsort.yaml"):
         self.model = YOLO(model_path)
         self.tracker_type = tracker_type
 
@@ -21,8 +21,8 @@ class YoloTracker(BaseTracker):
             tracker=self.tracker_type, 
             imgsz=640,   
             # MÁGICA 2: Baixando a confiança para 0.25 (A IA não "solta" a pessoa se ela borrar na imagem)
-            conf=0.25,   
-            iou=0.5,    
+            conf=0.35,   
+            iou=0.55,    
             verbose=False,
             device="0", 
             half=True,     

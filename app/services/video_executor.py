@@ -88,7 +88,7 @@ async def process_video_background(video_id: str, video_path: str, request_data:
             draw_polyline(frame, scaled_entrant_line, (0, 255, 0)) 
             draw_polyline(frame, scaled_passerby_line, (0, 255, 255)) 
 
-            # 💥 NOVA MÁGICA VISUAL MODERNIZADA PARA OS VÍDEOS
+           # 💥 NOVA MÁGICA VISUAL MODERNIZADA PARA OS VÍDEOS
             if detections is not None and len(detections) > 0:
                 
                 # Efeito Vidro Transparente
@@ -99,17 +99,20 @@ async def process_video_background(video_id: str, video_path: str, request_data:
                     cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
                 cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
 
-                # Bordas e Rastros
+                # Bordas (A caixa pode ser desenhada mesmo sem ID confirmado)
                 frame = box_annotator.annotate(scene=frame, detections=detections)
-                frame = trace_annotator.annotate(scene=frame, detections=detections)
                 
-                labels = [f"ID: {tracker_id}" for tracker_id in detections.tracker_id]
-                frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
+                # 💥 CORREÇÃO: Só desenha Rastro e Nome se o Rastreador (ByteTrack) já emitiu o ID!
+                if detections.tracker_id is not None:
+                    frame = trace_annotator.annotate(scene=frame, detections=detections)
+                    
+                    labels = [f"ID: {tracker_id}" for tracker_id in detections.tracker_id]
+                    frame = label_annotator.annotate(scene=frame, detections=detections, labels=labels)
             
-            cv2.rectangle(frame, (10, 10), (250, 100), (0, 0, 0), -1)
-            cv2.putText(frame, f"Entrantes: {analytics.counts['entrant']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            cv2.putText(frame, f"Passantes: {analytics.counts['passerby']}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
+            cv2.rectangle(frame, (10, 10), (250, 140), (0, 0, 0), -1)
+            cv2.putText(frame, f"Entrantes: {analytics.counts['entrantes']}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.putText(frame, f"Saidas: {analytics.counts['saidas']}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            cv2.putText(frame, f"Passantes: {analytics.counts['passantes']}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             out.write(frame)
             success, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60]) # Reduza a qualidade pra 60 pra ficar mais leve!
             if success:
